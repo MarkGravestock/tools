@@ -1,0 +1,1375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postgres Query Explainer</title>
+<script>
+  // Set the theme before first paint to avoid a flash of the wrong colours.
+  (function () {
+    try {
+      var t = localStorage.getItem("pqe-theme");
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { document.documentElement.setAttribute("data-theme", "light"); }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f6f7;
+    --panel: #ffffff;
+    --panel-2: #fafcfd;
+    --ink: #16232b;
+    --muted: #5a7184;
+    --pg: #336791;
+    --pg-text: #336791;
+    --pg-soft: #e3ecf3;
+    --amber: #b45309;
+    --amber-soft: #fdf1e3;
+    --line: #d6dee3;
+    /* Operation-type colours (colour key). Paired with white badge text; same in both themes. */
+    --cat-scan: #336791;
+    --cat-join: #7c3aed;
+    --cat-aggregate: #1f7a4d;
+    --cat-sort: #b45309;
+    --cat-combine: #0e7490;
+    --cat-buffer: #b83280;
+    --cat-modify: #b91c1c;
+    --cat-control: #5b6b78;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --disp: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f171d;
+    --panel: #18232b;
+    --panel-2: #1e2b34;
+    --ink: #dbe7ee;
+    --muted: #90a7b6;
+    --pg: #3f82b3;
+    --pg-text: #6fb0e0;
+    --pg-soft: #1d3546;
+    --amber: #eaa23e;
+    --amber-soft: #382712;
+    --line: #2a3a45;
+  }
+  html { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--disp); font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  h1 .kw { color: var(--pg-text); }
+  .tagline { color: var(--muted); margin: 0 0 18px; max-width: 72ch; }
+  .tagline a { color: var(--pg-text); }
+  .pgver { font-family: var(--mono); font-size: 12px; color: var(--pg-text); background: var(--pg-soft); border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
+  .theme-toggle { margin-left: auto; align-self: center; padding: 6px 10px; font-size: 15px; line-height: 1; }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  button {
+    font-family: var(--disp); font-size: 14px; font-weight: 500;
+    padding: 8px 16px; border-radius: 6px; border: 1px solid var(--pg);
+    background: var(--pg); color: #fff; cursor: pointer;
+  }
+  button.secondary { background: var(--panel); color: var(--pg-text); }
+  input[type="checkbox"] { accent-color: var(--pg); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--pg); outline-offset: 2px;
+  }
+  select {
+    font-family: var(--disp); font-size: 14px; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink);
+    max-width: 100%;
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  #status { font-family: var(--mono); font-size: 13px; color: var(--muted); min-height: 20px; margin-bottom: 10px; white-space: pre-wrap; }
+  #status.err { color: var(--amber); }
+
+  .editorbox { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  textarea {
+    display: block; width: 100%; min-height: 150px; padding: 14px 16px; border: 0; resize: vertical;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.55; color: var(--ink); background: var(--panel);
+    tab-size: 2;
+  }
+  .editorbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+  .editorbar .spacer { flex: 1; }
+  #timing { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  label.toggle { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+
+  section { margin-top: 26px; }
+  h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  #summary { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--pg); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; }
+
+  /* Operation-type colour key */
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-bottom: 14px; font-size: 12.5px; color: var(--muted); }
+  .legend .leglabel { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .legend .legkey { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+  /* Plan tree */
+  .node { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px 10px; margin-bottom: 10px; }
+  .node .rel { position: absolute; top: -9px; left: 12px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--bg); padding: 0 6px; }
+  .nhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .nbadge { font-family: var(--mono); font-weight: 500; font-size: 13.5px; color: #fff; background: var(--pg); border-radius: 4px; padding: 2px 8px; }
+  .ntarget { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+  .ntime { margin-left: auto; font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .tbar { height: 3px; background: var(--pg-soft); border-radius: 2px; margin: 8px 0 8px; overflow: hidden; }
+  .tbar > i { display: block; height: 100%; background: var(--pg); }
+  .nrows { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+  .nrows .off { color: var(--amber); font-weight: 500; }
+  .nwhat { margin: 2px 0 2px; }
+  .ndetail { color: var(--muted); font-size: 14px; margin: 2px 0 6px; max-width: 82ch; }
+  .ins { list-style: none; margin: 6px 0 2px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  .ins li { font-size: 13.5px; padding-left: 18px; position: relative; max-width: 88ch; }
+  .ins li::before { content: "\2013"; position: absolute; left: 4px; color: var(--muted); }
+  .ins li.warn { color: var(--amber); background: var(--amber-soft); border-radius: 4px; padding: 4px 8px 4px 22px; }
+  .ins li.warn::before { content: "\26a0"; left: 6px; color: var(--amber); }
+  .ins li.cond { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+  .ins li.buf { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .kids { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 14px; }
+  body.compact .nwhat, body.compact .ndetail, body.compact .ins li:not(.warn):not(.cond) { display: none; }
+
+  /* Results table */
+  .tblwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+  th { background: var(--panel-2); font-weight: 500; color: var(--pg-text); position: sticky; top: 0; }
+  tr:last-child td { border-bottom: 0; }
+  .rowcount { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  details.raw { margin-top: 14px; }
+  details.raw summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
+  details.raw pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; }
+
+  /* Schema */
+  .schema { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .schematbl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; }
+  .schematbl b { color: var(--pg-text); font-weight: 500; display: block; margin-bottom: 4px; }
+  .schematbl span { color: var(--muted); }
+  .schematbl div { line-height: 1.6; }
+
+  footer { margin-top: 48px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+  footer a { color: var(--pg-text); }
+  @media (prefers-reduced-motion: no-preference) {
+    .tbar > i { transition: width 0.4s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="kw">EXPLAIN</span>, explained</h1>
+    <span class="pgver" id="pgver">starting Postgres&hellip;</span>
+    <button id="themeToggle" class="secondary theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+  </header>
+  <p class="tagline">A PostgreSQL query explainer that runs entirely in your browser (via <a href="https://pglite.dev">PGlite</a>, real Postgres compiled to WASM). Run a query and get its <code>EXPLAIN ANALYZE</code> plan back as an annotated tree: what each step does, where the time went, and where the planner guessed wrong.</p>
+
+  <div class="controls">
+    <button id="loadExample">Load example database</button>
+    <button id="openFile" class="secondary">Open a .sql file</button>
+    <input type="file" id="filePicker" accept=".sql,text/plain" hidden>
+    <select id="examplePicker" hidden aria-label="Example queries"></select>
+  </div>
+  <div class="hint" id="filehint" hidden>Plain SQL only (CREATE TABLE + INSERT statements). For an existing database use <code>pg_dump --inserts --no-owner --no-privileges</code> &mdash; the default COPY format isn&rsquo;t supported here.</div>
+  <div id="status"></div>
+
+  <div class="editorbox" id="editorbox" hidden>
+    <textarea id="sql" spellcheck="false" aria-label="SQL query" placeholder="-- Write SQL here. Multiple statements are allowed; the last one is explained."></textarea>
+    <div class="editorbar">
+      <button id="run">Run &amp; explain</button>
+      <span class="hint">Ctrl+Enter</span>
+      <span class="spacer"></span>
+      <label class="toggle"><input type="checkbox" id="annotToggle" checked> annotations</label>
+      <span id="timing"></span>
+    </div>
+  </div>
+
+  <section id="schemaSection" hidden>
+    <h2>Schema</h2>
+    <div class="schema" id="schema"></div>
+  </section>
+
+  <section id="planSection" hidden>
+    <h2>Query plan &mdash; annotated</h2>
+    <div id="summary"></div>
+    <div class="legend" id="legend" hidden></div>
+    <div id="plan"></div>
+    <details class="raw"><summary>Raw EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) output</summary><pre id="rawjson"></pre></details>
+  </section>
+
+  <section id="resultSection" hidden>
+    <h2>Results</h2>
+    <div class="tblwrap"><table id="results"></table></div>
+    <div class="rowcount" id="rowcount"></div>
+  </section>
+
+  <footer>
+    Everything runs locally in this page; nothing leaves your browser. Queries are executed for real (once for results, once under <code>EXPLAIN ANALYZE</code> for read-only statements; writes run once, under <code>EXPLAIN ANALYZE</code>).
+    Inspired by <a href="https://tools.simonwillison.net/sqlite-query-explainer">Simon Willison&rsquo;s SQLite Query Explainer</a>.
+    Reference: <a href="https://www.postgresql.org/docs/current/using-explain.html">Using EXPLAIN</a> &middot; <a href="https://www.pgmustard.com/docs/explain">pgMustard glossary</a>.
+    Note: this is single-process Postgres &mdash; no parallel workers, and timings differ from a real server.
+  </footer>
+</div>
+
+<script type="module">
+import { PGlite } from "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.5.4/dist/index.js";
+import { vector } from "https://cdn.jsdelivr.net/npm/@electric-sql/pglite-pgvector@0.0.5/dist/index.js";
+
+// ---- Plan annotation logic (pure, no DOM) ----------------------------------
+// Consumes one plan object from EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON).
+
+const NODE_DOCS = {
+  'Seq Scan': {
+    what: 'Reads every row in the table, top to bottom.',
+    detail: 'No index is used. Cost grows linearly with table size, but for small tables or queries that need most rows this is the cheapest option — indexes are not free to traverse.',
+  },
+  'Index Scan': {
+    what: 'Walks a B-tree index, then fetches each matching row from the table.',
+    detail: 'Each index hit costs an extra trip to the heap (the table) to fetch the full row and check visibility. Efficient for a small share of rows; for large shares the random heap access can be slower than a sequential scan.',
+  },
+  'Index Only Scan': {
+    what: 'Answers the query from the index alone — the table is (mostly) never touched.',
+    detail: 'Possible when every column the query needs is in the index. "Heap Fetches" counts rows where Postgres still had to visit the table because the visibility map wasn\u2019t up to date — VACUUM keeps that number low.',
+  },
+  'Bitmap Index Scan': {
+    what: 'Scans an index and builds an in-memory bitmap of matching row locations.',
+    detail: 'Produces page positions rather than rows. Feeds a Bitmap Heap Scan above it, and multiple bitmaps can be combined with BitmapOr / BitmapAnd.',
+  },
+  'Bitmap Heap Scan': {
+    what: 'Fetches table pages in physical order using a bitmap built below it.',
+    detail: 'A middle ground between index scan and sequential scan: index selectivity, but heap pages read in order (fewer random reads). If the bitmap outgrows work_mem it degrades to "lossy" mode, tracking whole pages and re-checking the condition per row.',
+  },
+  'BitmapOr': {
+    what: 'Combines two or more bitmaps with OR.',
+    detail: 'This is how Postgres uses several single-column indexes to satisfy an OR condition — something a single B-tree scan can\u2019t do.',
+  },
+  'BitmapAnd': {
+    what: 'Intersects two or more bitmaps with AND.',
+    detail: 'Lets Postgres combine separate indexes on different columns instead of requiring one composite index.',
+  },
+  'Tid Scan': {
+    what: 'Fetches rows directly by physical position (ctid).',
+    detail: 'The fastest possible access path — no index, no scan, just "go to page X, item Y". Rarely seen outside of maintenance queries because ctids change when rows are updated or the table is vacuumed.',
+  },
+  'Nested Loop': {
+    what: 'For each row from the outer (first) child, runs the inner (second) child to find matches.',
+    detail: 'Ideal when the outer side is small and the inner side has a fast parameterised lookup (usually an index). Cost is outer rows \u00d7 inner lookup cost, so it degrades badly if the outer estimate is wrong.',
+  },
+  'Hash Join': {
+    what: 'Builds a hash table from one input, then probes it with rows from the other.',
+    detail: 'The workhorse for joining large inputs on equality. The smaller input (under the Hash node) is loaded into memory first; if it exceeds work_mem it splits into batches spilled to disk.',
+  },
+  'Merge Join': {
+    what: 'Merges two inputs that are both sorted on the join key.',
+    detail: 'Reads both sides once, in step. Chosen when sorted input is available cheaply (e.g. from indexes) or the inputs are huge. May need explicit Sort nodes below it if no sorted path exists.',
+  },
+  'Hash': {
+    what: 'Loads its child\u2019s rows into an in-memory hash table.',
+    detail: 'The build side of a Hash Join. "Batches: 1" means it all fit in work_mem; more than one batch means it spilled to disk and rows were written and re-read.',
+  },
+  'Materialize': {
+    what: 'Buffers its child\u2019s output so it can be re-read cheaply.',
+    detail: 'Usually appears under the inner side of a join that will be rescanned many times, saving Postgres from recomputing the child for every outer row.',
+  },
+  'Memoize': {
+    what: 'Caches inner-side results keyed by the join parameter.',
+    detail: 'When the outer side of a nested loop repeats the same key, Memoize serves the cached rows instead of re-running the index lookup. The hit/miss ratio below tells you whether the cache paid off.',
+  },
+  'Sort': {
+    what: 'Sorts its input.',
+    detail: 'The method matters: "quicksort" ran in memory; "top-N heapsort" kept only the N rows a LIMIT needs; "external merge" spilled to disk because the data exceeded work_mem.',
+  },
+  'Incremental Sort': {
+    what: 'Finishes a sort that\u2019s already partly done.',
+    detail: 'The input arrives sorted on a prefix of the requested keys (e.g. from an index), so Postgres only sorts within each group of equal prefix values. Much cheaper than a full sort and starts streaming rows sooner.',
+  },
+  'Aggregate': {
+    what: 'Computes aggregate functions (count, sum, \u2026).',
+    detail: '',
+  },
+  'WindowAgg': {
+    what: 'Computes window functions over partitions of ordered rows.',
+    detail: 'Requires its input ordered by PARTITION BY / ORDER BY keys, which is why a Sort or Incremental Sort usually sits beneath it. Unlike GROUP BY, every input row is kept.',
+  },
+  'Unique': {
+    what: 'Removes adjacent duplicate rows from sorted input.',
+    detail: 'The sorted-input version of DISTINCT — cheap because duplicates arrive next to each other. (The alternative is hashing via HashAggregate.)',
+  },
+  'Limit': {
+    what: 'Stops after emitting the requested number of rows.',
+    detail: 'Powerful because it lets the whole plan below stop early — nodes beneath a Limit often show far fewer actual rows than planned, which here is by design, not a mis-estimate.',
+  },
+  'Append': {
+    what: 'Concatenates the output of several children.',
+    detail: 'Appears for UNION ALL and for partitioned tables, where each surviving partition is one child. Partitions the planner could prove irrelevant are pruned and never appear.',
+  },
+  'Merge Append': {
+    what: 'Merges several sorted children, preserving order.',
+    detail: 'Lets a partitioned table deliver globally ordered output without re-sorting — each partition\u2019s index provides order and this node interleaves them.',
+  },
+  'Recursive Union': {
+    what: 'Drives a WITH RECURSIVE query.',
+    detail: 'Runs the non-recursive term once, then repeats the recursive term against the previous iteration\u2019s rows (the "working table") until no new rows appear.',
+  },
+  'WorkTable Scan': {
+    what: 'Reads the previous iteration\u2019s rows inside a recursive CTE.',
+    detail: 'The recursive term\u2019s self-reference. Its actual loop count equals the number of iterations the recursion ran.',
+  },
+  'CTE Scan': {
+    what: 'Reads rows from a materialised WITH (CTE) result.',
+    detail: 'The CTE below was computed once and stored; this node reads that store. Since PostgreSQL 12, CTEs referenced once are inlined instead unless you write AS MATERIALIZED.',
+  },
+  'Subquery Scan': {
+    what: 'Reads rows from a sub-select that couldn\u2019t be flattened into the outer query.',
+    detail: 'Often optimised away entirely; when visible it usually just relabels columns from the child plan.',
+  },
+  'Function Scan': {
+    what: 'Treats a function\u2019s result set as a table.',
+    detail: 'generate_series, unnest, jsonb_to_recordset and friends. The planner has limited insight into how many rows a function returns, so estimates here are often guesses (default: 1000 for set-returning SQL functions, or the ROWS clause of the function definition).',
+  },
+  'Values Scan': {
+    what: 'Reads rows from a literal VALUES list.',
+    detail: 'An inline table written directly in the query — handy for joining a small fixed set of values against real tables.',
+  },
+  'Result': {
+    what: 'Produces a computed row, or gates its child with a one-time filter.',
+    detail: 'Appears for expressions needing no table, and for "one-time filters" the executor can evaluate once instead of per row.',
+  },
+  'ProjectSet': {
+    what: 'Expands set-returning functions in the SELECT list.',
+    detail: 'Each input row can fan out into many output rows (e.g. unnest in the select list).',
+  },
+  'SetOp': {
+    what: 'Computes INTERSECT or EXCEPT.',
+    detail: 'Tags rows by which input they came from, then compares counts per distinct row — hashed or sorted, like Aggregate.',
+  },
+  'Group': {
+    what: 'Groups adjacent equal rows from sorted input (GROUP BY without aggregates).',
+    detail: '',
+  },
+  'LockRows': {
+    what: 'Locks each row as it flows through (SELECT \u2026 FOR UPDATE / SHARE).',
+    detail: '',
+  },
+  'Gather': {
+    what: 'Collects rows from parallel worker processes.',
+    detail: 'Note: in this in-browser build parallel workers are unavailable, so you will rarely see this node here even where a server would use it.',
+  },
+  'Gather Merge': {
+    what: 'Collects rows from parallel workers, preserving sort order.',
+    detail: '',
+  },
+  'ModifyTable': {
+    what: 'Applies INSERT / UPDATE / DELETE / MERGE changes produced by the plan below.',
+    detail: '',
+  },
+};
+
+// Groups node types into families for the colour key. Keys match --cat-* CSS vars.
+const NODE_CATEGORY = {
+  'Seq Scan': 'scan', 'Index Scan': 'scan', 'Index Only Scan': 'scan',
+  'Bitmap Index Scan': 'scan', 'Bitmap Heap Scan': 'scan', 'BitmapOr': 'scan', 'BitmapAnd': 'scan',
+  'Tid Scan': 'scan', 'CTE Scan': 'scan', 'Subquery Scan': 'scan', 'Function Scan': 'scan',
+  'Values Scan': 'scan', 'WorkTable Scan': 'scan', 'Sample Scan': 'scan', 'Foreign Scan': 'scan',
+  'Named Tuplestore Scan': 'scan', 'Table Function Scan': 'scan',
+  'Nested Loop': 'join', 'Hash Join': 'join', 'Merge Join': 'join',
+  'Aggregate': 'aggregate', 'WindowAgg': 'aggregate', 'Group': 'aggregate', 'SetOp': 'aggregate', 'Unique': 'aggregate',
+  'Sort': 'sort', 'Incremental Sort': 'sort',
+  'Append': 'combine', 'Merge Append': 'combine', 'Recursive Union': 'combine', 'Gather': 'combine', 'Gather Merge': 'combine',
+  'Hash': 'buffer', 'Materialize': 'buffer', 'Memoize': 'buffer',
+  'ModifyTable': 'modify', 'LockRows': 'modify',
+  'Limit': 'control', 'Result': 'control', 'ProjectSet': 'control',
+};
+
+// Ordered legend metadata: [key, label, description].
+const CATEGORY_META = [
+  ['scan', 'Scan', 'Reads rows from a table, index, CTE, or other source'],
+  ['join', 'Join', 'Combines two inputs (nested loop, hash, or merge)'],
+  ['aggregate', 'Aggregate / group', 'Groups rows and computes aggregates or DISTINCT'],
+  ['sort', 'Sort', 'Orders rows'],
+  ['combine', 'Combine', 'Appends, merges, or gathers several inputs'],
+  ['buffer', 'Materialize / cache', 'Buffers or caches rows so they can be re-read'],
+  ['modify', 'Modify', 'Writes rows (INSERT/UPDATE/DELETE) or takes row locks'],
+  ['control', 'Control', 'Limit, result, and other flow-control steps'],
+];
+
+function nodeCategory(nodeType) {
+  return NODE_CATEGORY[nodeType] || 'control';
+}
+
+const AGG_STRATEGY = {
+  Plain: 'A single aggregate over all input — no GROUP BY, so one result row.',
+  Hashed: 'HashAggregate: builds a hash table keyed by the GROUP BY columns. Input order doesn\u2019t matter, but the whole set of groups must fit in memory (or spill in batches).',
+  Sorted: 'GroupAggregate: input arrives sorted on the GROUP BY keys, so each group finishes as soon as the key changes. Streams results without holding all groups in memory.',
+  Mixed: 'Combines hashed and sorted strategies for different grouping sets.',
+};
+
+const JOIN_TYPES = {
+  Inner: null,
+  Left: 'LEFT join: every outer row is emitted; unmatched ones get NULLs for the inner side.',
+  Right: 'RIGHT join executed with sides as shown: every row from the inner (hashed/second) input survives. Postgres often flips LEFT joins into RIGHT joins so the smaller side is the one hashed.',
+  Full: 'FULL join: unmatched rows from both sides are kept, NULL-padded.',
+  Semi: 'Semi join (EXISTS / IN): emits each outer row at most once, as soon as one match is found — it never multiplies rows.',
+  Anti: 'Anti join (NOT EXISTS): emits outer rows that have no match at all.',
+  'Right Semi': 'Right semi join: EXISTS-style semantics with the inputs swapped from how you wrote them.',
+  'Right Anti': 'Right anti join: NOT EXISTS-style semantics with the inputs swapped from how you wrote them.',
+};
+
+const PARENT_REL = {
+  Outer: 'outer',
+  Inner: 'inner',
+  Member: 'member',
+  Subquery: 'subquery',
+  InitPlan: 'init plan',
+  SubPlan: 'subplan',
+};
+
+function fmtNum(n) {
+  if (n === undefined || n === null) return '?';
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
+  if (n >= 1e4) return Math.round(n / 1e3) + 'k';
+  return String(Math.round(n * 100) / 100);
+}
+
+function fmtMs(ms) {
+  if (ms === undefined || ms === null) return '?';
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + ' s';
+  if (ms >= 1) return ms.toFixed(1) + ' ms';
+  return ms.toFixed(3) + ' ms';
+}
+
+function fmtKb(kb) {
+  if (kb >= 1024) return (kb / 1024).toFixed(1) + ' MB';
+  return kb + ' kB';
+}
+
+// Human title for a node, e.g. "Index Scan using orders_pkey on orders"
+function nodeTitle(n) {
+  let t = n['Node Type'];
+  if (t === 'Aggregate' && n['Strategy']) {
+    t = { Hashed: 'HashAggregate', Sorted: 'GroupAggregate', Plain: 'Aggregate', Mixed: 'MixedAggregate' }[n['Strategy']] || t;
+  }
+  if (t === 'SetOp' && n['Command']) t = n['Command'] + ' (SetOp)';
+  if (n['Join Type'] && n['Join Type'] !== 'Inner' && /Join|Nested Loop/.test(t)) t += ' (' + n['Join Type'] + ')';
+  if (n['Operation'] && n['Node Type'] === 'ModifyTable') t = n['Operation'];
+  return t;
+}
+
+function nodeTarget(n) {
+  const bits = [];
+  if (n['Index Name']) bits.push('using ' + n['Index Name']);
+  if (n['Relation Name']) {
+    bits.push('on ' + n['Relation Name'] + (n['Alias'] && n['Alias'] !== n['Relation Name'] ? ' ' + n['Alias'] : ''));
+  } else if (n['CTE Name']) bits.push('on CTE ' + n['CTE Name']);
+  else if (n['Function Name']) bits.push('on ' + n['Function Name'] + '()');
+  return bits.join(' ');
+}
+
+// Static explanation for a node.
+function describeNode(n) {
+  const doc = NODE_DOCS[n['Node Type']];
+  let what = doc ? doc.what : 'An execution step (no annotation available for this node type).';
+  let detail = doc ? doc.detail : '';
+  if (n['Node Type'] === 'Aggregate' && n['Strategy'] && AGG_STRATEGY[n['Strategy']]) {
+    detail = AGG_STRATEGY[n['Strategy']];
+  }
+  const jt = n['Join Type'] && JOIN_TYPES[n['Join Type']];
+  if (jt) detail = (detail ? detail + ' ' : '') + jt;
+  return { what, detail };
+}
+
+// Dynamic, data-driven observations. Returns [{level: 'info'|'warn', text}]
+function nodeInsights(n, totals) {
+  const out = [];
+  const loops = n['Actual Loops'];
+  const analyzed = loops !== undefined;
+
+  if (analyzed && loops === 0) {
+    out.push({ level: 'info', text: 'Never executed — the executor could prove this branch wasn\u2019t needed (e.g. pruned at run time or short-circuited).' });
+    return out;
+  }
+
+  // Estimate vs actual (per-loop comparison, reported as totals)
+  if (analyzed) {
+    const est = n['Plan Rows'];
+    const act = n['Actual Rows'];
+    if (est !== undefined && act !== undefined) {
+      const totalAct = act * loops;
+      n._estTotal = est * loops;
+      n._actTotal = totalAct;
+      const ratio = (Math.max(est, act) + 1) / (Math.min(est, act) + 1);
+      const underLimit = totals.hasLimit && act < est;
+      if (ratio >= 10 && !underLimit) {
+        out.push({
+          level: 'warn',
+          text: 'Estimate off by ' + Math.round(ratio) + '\u00d7: planner expected ' + fmtNum(est) +
+            ' row' + (est === 1 ? '' : 's') + ' per loop, got ' + fmtNum(act) +
+            '. Mis-estimates like this are how the planner ends up choosing the wrong join or scan strategy.',
+        });
+      }
+    }
+    if (loops > 1) {
+      out.push({ level: 'info', text: 'Executed ' + fmtNum(loops) + ' times (once per outer row); row and time figures shown are per execution.' });
+    }
+  }
+
+  // Filters
+  const rrf = n['Rows Removed by Filter'];
+  if (rrf > 0) {
+    const kept = n['Actual Rows'] || 0;
+    const pct = Math.round((rrf / (rrf + kept)) * 100);
+    out.push({
+      level: pct >= 90 && rrf * (loops || 1) > 1000 ? 'warn' : 'info',
+      text: 'Filter discarded ' + fmtNum(rrf) + ' rows per loop (' + pct + '% of what this node read)' +
+        (pct >= 90 && rrf * (loops || 1) > 1000 ? ' — an index matching this condition could avoid reading them at all.' : '.'),
+    });
+  }
+  const rrj = n['Rows Removed by Join Filter'];
+  if (rrj > 0) out.push({ level: 'info', text: 'Join filter discarded ' + fmtNum(rrj) + ' candidate pairings per loop.' });
+  const rrr = n['Rows Removed by Index Recheck'];
+  if (rrr > 0) {
+    out.push({ level: 'warn', text: 'Recheck discarded ' + fmtNum(rrr) + ' rows: the bitmap went lossy (work_mem too small to track individual rows), so whole pages were fetched and the condition re-tested per row.' });
+  }
+  if (n['Lossy Heap Blocks'] > 0) {
+    out.push({ level: 'warn', text: fmtNum(n['Lossy Heap Blocks']) + ' heap pages tracked lossily — the bitmap exceeded work_mem.' });
+  }
+
+  // Index Only Scan heap fetches
+  if (n['Node Type'] === 'Index Only Scan' && n['Heap Fetches'] !== undefined) {
+    if (n['Heap Fetches'] === 0) {
+      out.push({ level: 'info', text: 'Heap fetches: 0 — every row was answered from the index alone. The visibility map is fully up to date.' });
+    } else {
+      out.push({ level: 'warn', text: fmtNum(n['Heap Fetches']) + ' heap fetches: these rows still required a table visit because their pages aren\u2019t marked all-visible. Running VACUUM would push this towards 0.' });
+    }
+  }
+
+  // Sort details
+  if (n['Sort Method']) {
+    const space = n['Sort Space Used'] !== undefined ? fmtKb(n['Sort Space Used']) : '';
+    if (/external/.test(n['Sort Method'])) {
+      out.push({ level: 'warn', text: 'Sorted on disk (' + n['Sort Method'] + ', ' + space + ' of temp files) — the data exceeded work_mem. Raising work_mem, or letting an index provide the order, would keep this in memory.' });
+    } else if (/top-N/.test(n['Sort Method'])) {
+      out.push({ level: 'info', text: 'Top-N heapsort in ' + space + ': because of the LIMIT, only the current best N rows were kept in memory rather than sorting everything.' });
+    } else {
+      out.push({ level: 'info', text: 'Sorted in memory (' + n['Sort Method'] + ', ' + space + ').' });
+    }
+    if (n['Sort Key']) out.push({ level: 'info', text: 'Sort key: ' + n['Sort Key'].join(', ') });
+  }
+  if (n['Node Type'] === 'Incremental Sort' && n['Presorted Key']) {
+    out.push({ level: 'info', text: 'Already sorted on: ' + n['Presorted Key'].join(', ') + ' — only the remaining key(s) needed sorting, group by group.' });
+  }
+
+  // Hash details
+  if (n['Node Type'] === 'Hash' && n['Hash Batches'] !== undefined) {
+    if (n['Hash Batches'] > 1) {
+      out.push({ level: 'warn', text: 'Hash table split into ' + n['Hash Batches'] + ' batches (peak ' + fmtKb(n['Peak Memory Usage']) + ') — it didn\u2019t fit in work_mem, so both join inputs were partitioned to disk and re-read.' });
+    } else {
+      out.push({ level: 'info', text: 'Hash table built in one batch, peak ' + fmtKb(n['Peak Memory Usage']) + ' — fits comfortably in work_mem.' });
+    }
+  }
+  if (n['Node Type'] === 'Aggregate' && n['Strategy'] === 'Hashed') {
+    if (n['Disk Usage'] > 0) {
+      out.push({ level: 'warn', text: 'Hash aggregation spilled ' + fmtKb(n['Disk Usage']) + ' to disk across ' + n['HashAgg Batches'] + ' batches — too many groups for work_mem.' });
+    } else if (n['Peak Memory Usage'] !== undefined) {
+      out.push({ level: 'info', text: 'All groups held in memory (peak ' + fmtKb(n['Peak Memory Usage']) + ').' });
+    }
+  }
+
+  // Memoize
+  if (n['Node Type'] === 'Memoize') {
+    const hits = n['Cache Hits'], misses = n['Cache Misses'];
+    if (hits !== undefined) {
+      const total = hits + misses;
+      const pct = total ? Math.round((hits / total) * 100) : 0;
+      out.push({
+        level: pct >= 50 ? 'info' : 'warn',
+        text: 'Cache: ' + fmtNum(hits) + ' hits / ' + fmtNum(misses) + ' misses (' + pct + '% hit rate)' +
+          (n['Cache Evictions'] ? ', ' + fmtNum(n['Cache Evictions']) + ' evictions' : '') +
+          (pct >= 50 ? ' — repeated keys meant most lookups were served without touching the index again.' : ' — mostly unique keys, so the cache added little.'),
+      });
+    }
+    if (n['Cache Key']) out.push({ level: 'info', text: 'Cache key: ' + n['Cache Key'] });
+  }
+
+  // Conditions worth surfacing
+  const conds = [
+    ['Index Cond', 'Index condition'],
+    ['Order By', 'Order by (index-supplied)'],
+    ['Recheck Cond', 'Recheck condition'],
+    ['Hash Cond', 'Hash condition'],
+    ['Merge Cond', 'Merge condition'],
+    ['Join Filter', 'Join filter'],
+    ['Filter', 'Filter'],
+    ['TID Cond', 'TID condition'],
+    ['One-Time Filter', 'One-time filter'],
+    ['Group Key', 'Group key'],
+  ];
+  for (const [k, label] of conds) {
+    if (n[k]) out.push({ level: 'cond', text: label + ': ' + (Array.isArray(n[k]) ? n[k].join(', ') : n[k]) });
+  }
+
+  // Buffers
+  if (n['Shared Read Blocks'] !== undefined) {
+    const hit = n['Shared Hit Blocks'] || 0, read = n['Shared Read Blocks'] || 0;
+    if (hit + read > 0) {
+      out.push({ level: 'buf', text: 'Buffers: ' + fmtNum(hit) + ' pages from cache' + (read ? ', ' + fmtNum(read) + ' read from storage' : '') + ' (8 kB pages, cumulative with children).' });
+    }
+    const tw = (n['Temp Written Blocks'] || 0);
+    if (tw > 0) out.push({ level: 'buf', text: 'Temp files: ' + fmtNum(tw * 8) + ' kB written to disk.' });
+  }
+  return out;
+}
+
+// Walk plan: compute self time, attach annotations, flatten to tree structure.
+function annotatePlan(root, planning) {
+  let totalTime = 0;
+  let hasLimit = false;
+  (function scan(n) {
+    if (n['Node Type'] === 'Limit') hasLimit = true;
+    (n['Plans'] || []).forEach(scan);
+  })(root);
+
+  const inclusive = (n) => (n['Actual Total Time'] || 0) * (n['Actual Loops'] || 1);
+  totalTime = inclusive(root) || 1;
+
+  function walk(n, depth, parentRel) {
+    const kids = n['Plans'] || [];
+    const childTime = kids.reduce((s, k) => s + inclusive(k), 0);
+    const self = Math.max(0, inclusive(n) - childTime);
+    const desc = describeNode(n);
+    const node = {
+      raw: n,
+      depth,
+      parentRel: parentRel ? PARENT_REL[parentRel] || parentRel.toLowerCase() : null,
+      title: nodeTitle(n),
+      category: nodeCategory(n['Node Type']),
+      target: nodeTarget(n),
+      what: desc.what,
+      detail: desc.detail,
+      insights: nodeInsights(n, { hasLimit }),
+      estRows: n['Plan Rows'],
+      actRows: n['Actual Rows'],
+      loops: n['Actual Loops'],
+      totalActRows: n['Actual Rows'] !== undefined ? n['Actual Rows'] * n['Actual Loops'] : undefined,
+      selfTime: self,
+      selfPct: Math.min(100, (self / totalTime) * 100),
+      inclusiveTime: inclusive(n),
+      startupCost: n['Startup Cost'],
+      totalCost: n['Total Cost'],
+      children: kids.map((k) => walk(k, depth + 1, k['Parent Relationship'])),
+    };
+    return node;
+  }
+  return { tree: walk(root, 0, null), totalTime, planningTime: planning, hasLimit };
+}
+
+// Overall summary sentence(s) for the whole plan.
+function planSummary(annotated) {
+  const bits = [];
+  const nodes = [];
+  (function fl(n) { nodes.push(n); n.children.forEach(fl); })(annotated.tree);
+  const hottest = nodes.slice().sort((a, b) => b.selfTime - a.selfTime)[0];
+  if (hottest && hottest.selfTime > 0) {
+    bits.push('Most time (' + Math.round(hottest.selfPct) + '%) was spent in the ' + hottest.title + (hottest.target ? ' ' + hottest.target : '') + '.');
+  }
+  const warns = nodes.reduce((s, n) => s + n.insights.filter((i) => i.level === 'warn').length, 0);
+  if (warns) bits.push(warns + ' warning' + (warns === 1 ? '' : 's') + ' flagged below (amber).');
+  return bits.join(' ');
+}
+
+// Split a SQL script into statements on top-level semicolons
+// (respects quotes, dollar-quoting, comments).
+function splitStatements(sql) {
+  const stmts = [];
+  let cur = '', i = 0;
+  const n = sql.length;
+  while (i < n) {
+    const c = sql[i];
+    if (c === "'") { // string literal
+      cur += c; i++;
+      while (i < n) { cur += sql[i]; if (sql[i] === "'" && sql[i + 1] === "'") { cur += sql[++i]; } else if (sql[i] === "'") { i++; break; } i++; }
+      continue;
+    }
+    if (c === '"') { // quoted identifier
+      cur += c; i++;
+      while (i < n) { cur += sql[i]; if (sql[i] === '"') { i++; break; } i++; }
+      continue;
+    }
+    if (c === '-' && sql[i + 1] === '-') { while (i < n && sql[i] !== '\n') { cur += sql[i]; i++; } continue; }
+    if (c === '/' && sql[i + 1] === '*') { cur += '/*'; i += 2; while (i < n && !(sql[i] === '*' && sql[i + 1] === '/')) { cur += sql[i]; i++; } if (i < n) { cur += '*/'; i += 2; } continue; }
+    if (c === '$') { // dollar quoting
+      const m = /^\$[A-Za-z_]*\$/.exec(sql.slice(i));
+      if (m) {
+        const tag = m[0];
+        const end = sql.indexOf(tag, i + tag.length);
+        const stop = end === -1 ? n : end + tag.length;
+        cur += sql.slice(i, stop); i = stop; continue;
+      }
+    }
+    if (c === ';') { stmts.push(cur.trim()); cur = ''; i++; continue; }
+    cur += c; i++;
+  }
+  if (cur.trim()) stmts.push(cur.trim());
+  return stmts.filter((s) => s.length > 0);
+}
+
+function stripLeadingComments(stmt) {
+  let s = stmt;
+  for (;;) {
+    const t = s.replace(/^\s+/, '');
+    if (t.startsWith('--')) { const nl = t.indexOf('\n'); if (nl === -1) return ''; s = t.slice(nl + 1); continue; }
+    if (t.startsWith('/*')) { const end = t.indexOf('*/'); if (end === -1) return ''; s = t.slice(end + 2); continue; }
+    return t;
+  }
+}
+
+function isExplainable(stmt) {
+  return /^(select|insert|update|delete|merge|values|table|with|execute|declare)\b/i.test(stripLeadingComments(stmt));
+}
+
+
+// ---- Example database & example queries ------------------------------------
+// A small web-shop schema: 20k customers, 2k products, 100k orders,
+// ~200k order items, 30k events in a partitioned table.
+
+const EXAMPLE_DB_STEPS = [
+  ['Creating customers (20,000 rows)', `
+create table customers (
+  id int primary key,
+  name text not null,
+  country text not null,
+  tier text not null,
+  signed_up date not null
+);
+insert into customers
+select i, 'customer_'||i,
+  (array['GB','IE','FR','DE','US','JP','AU','BR'])[1 + i % 8],
+  case when i % 20 = 0 then 'platinum' when i % 5 = 0 then 'gold' else 'standard' end,
+  date '2020-01-01' + (i % 2000)
+from generate_series(1, 20000) i;
+create index customers_country_idx on customers (country);`],
+
+  ['Creating products (2,000 rows)', `
+create table products (
+  id int primary key,
+  name text not null,
+  category text not null,
+  price numeric(10,2) not null
+);
+insert into products
+select i, 'product_'||i,
+  (array['books','audio','cycling','photo','outdoors','kitchen'])[1 + i % 6],
+  (50 + (i * 37) % 950)::numeric / 10
+from generate_series(1, 2000) i;`],
+
+  ['Creating orders (100,000 rows + 4 indexes)', `
+create table orders (
+  id int primary key,
+  customer_id int not null references customers(id),
+  status text not null,
+  placed_at timestamptz not null,
+  total numeric(12,2) not null
+);
+insert into orders
+select i, 1 + (i * 7919) % 20000,
+  case when i % 50 = 0 then 'cancelled' when i % 11 = 0 then 'pending' else 'shipped' end,
+  timestamptz '2024-01-01' + ((i % 730) || ' days')::interval + ((i % 24) || ' hours')::interval,
+  ((i * 131) % 90000)::numeric / 100 + 5
+from generate_series(1, 100000) i;
+create index orders_customer_idx on orders (customer_id);
+create index orders_placed_at_idx on orders (placed_at);
+create index orders_status_idx on orders (status);
+create index orders_cust_placed_idx on orders (customer_id, placed_at);`],
+
+  ['Creating order_items (~200,000 rows)', `
+create table order_items (
+  order_id int not null,
+  line_no int not null,
+  product_id int not null references products(id),
+  qty int not null,
+  primary key (order_id, line_no)
+);
+create index order_items_product_idx on order_items (product_id);
+insert into order_items
+select o.i, ln, 1 + (o.i * ln * 31) % 2000, 1 + (o.i + ln) % 5
+from generate_series(1, 100000) o(i), generate_series(1, 1 + o.i % 3) ln;`],
+
+  ['Creating events (partitioned, 30,000 rows)', `
+create table events (
+  id bigint generated always as identity,
+  occurred_on date not null,
+  kind text not null,
+  payload text
+) partition by range (occurred_on);
+create table events_2025 partition of events for values from ('2025-01-01') to ('2026-01-01');
+create table events_2026 partition of events for values from ('2026-01-01') to ('2027-01-01');
+insert into events (occurred_on, kind, payload)
+select date '2025-03-01' + (i % 500), (array['login','purchase','refund','view'])[1 + i % 4], 'p'||i
+from generate_series(1, 30000) i;
+create index events_kind_idx on events (kind);`],
+  ['Creating doc_embeddings (4,000 vectors + HNSW index)', `
+create extension if not exists vector;
+create table doc_embeddings (
+  id int primary key,
+  topic text not null,
+  embedding vector(8) not null
+);
+insert into doc_embeddings
+select i,
+  (array['kafka','spring','postgres','k8s'])[1 + i % 4],
+  array[(i%7)::float, (i%13)::float, (i%5)::float, (i%11)::float,
+        (i%3)::float, (i%17)::float, (i%2)::float, (i%19)::float]::vector
+from generate_series(1, 4000) i;
+create index doc_embeddings_hnsw on doc_embeddings using hnsw (embedding vector_l2_ops);`],
+];
+
+const EXAMPLES = [
+  { group: 'Scans', title: 'Sequential scan — read the whole table', sql:
+`-- No index can help with an inequality on an unindexed column,
+-- so Postgres reads all 100,000 rows.
+select count(*) from orders where total > 400;` },
+
+  { group: 'Scans', title: 'Index scan — primary key lookup', sql:
+`-- One B-tree descent, one heap fetch. As fast as it gets for a single row.
+select * from orders where id = 4242;` },
+
+  { group: 'Scans', title: 'Index only scan — the table is never touched', sql:
+`-- orders_cust_placed_idx contains both columns the query needs,
+-- and provides the requested order for free. Watch "Heap Fetches: 0".
+select customer_id, placed_at from orders
+where customer_id = 77
+order by placed_at;` },
+
+  { group: 'Scans', title: 'Bitmap scan — medium selectivity', sql:
+`-- ~9% of rows match: too many for row-at-a-time index scans, too few
+-- for a full scan. The bitmap fetches heap pages in physical order.
+select avg(total) from orders where status = 'pending';` },
+
+  { group: 'Scans', title: 'BitmapOr — combining two indexes for an OR', sql:
+`-- A single B-tree can't serve an OR across different columns.
+-- Postgres scans both indexes, ORs the bitmaps, then visits the heap once.
+select count(*) from orders
+where status = 'pending' or placed_at > '2025-12-01';` },
+
+  { group: 'Scans', title: 'TID scan — fetch by physical row address', sql:
+`-- ctid is (page, item). No index, no scan: straight to the page.
+select ctid, * from orders where ctid = '(0,1)';` },
+
+  { group: 'Joins', title: 'Nested loop — small outer side drives index lookups', sql:
+`-- 11 customers on the outer side; for each, an index probe into orders.
+select c.name, o.total
+from customers c
+join orders o on o.customer_id = c.id
+where c.id between 100 and 110;` },
+
+  { group: 'Joins', title: 'Hash join — the workhorse for big joins', sql:
+`-- All customers are hashed into memory, then 100k orders probe the table.
+select c.country, sum(o.total)
+from customers c
+join orders o on o.customer_id = c.id
+group by c.country;` },
+
+  { group: 'Joins', title: 'Merge join — both sides already sorted', sql:
+`-- Both inputs can arrive sorted on the join key via their primary keys,
+-- so Postgres just zips them together. The LIMIT stops it early.
+select o.id, oi.product_id
+from orders o
+join order_items oi on oi.order_id = o.id
+order by o.id
+limit 50;` },
+
+  { group: 'Joins', title: 'Semi join — EXISTS never multiplies rows', sql:
+`-- Each customer is emitted at most once, however many cancelled
+-- orders they have. Note "Hash Join (Semi)" vs a plain join + DISTINCT.
+select count(*) from customers c
+where exists (
+  select 1 from orders o
+  where o.customer_id = c.id and o.status = 'cancelled'
+);` },
+
+  { group: 'Joins', title: 'Anti join — NOT EXISTS', sql:
+`-- Customers with no orders at all. The join emits only outer rows
+-- with zero matches.
+select count(*) from customers c
+where not exists (select 1 from orders o where o.customer_id = c.id);` },
+
+  { group: 'Joins', title: 'Memoize — caching repeated inner lookups', sql:
+`-- product_id repeats constantly in order_items, so with hash join
+-- disabled the nested loop caches inner rows per key. Watch the hit rate.
+set enable_hashjoin = off;
+set enable_mergejoin = off;
+select oi.order_id, p.price
+from order_items oi
+join products p on p.id = oi.product_id
+where oi.order_id between 1 and 500;` },
+
+  { group: 'Joins', title: 'Materialize — buffering a rescanned inner side', sql:
+`-- The distinct-status subquery is computed once, buffered, and replayed
+-- for each of the 3 outer rows.
+select c.id, s.status
+from customers c
+cross join (select distinct status from orders) s
+where c.id <= 3;` },
+
+  { group: 'Sorting', title: 'Top-N heapsort — LIMIT changes everything', sql:
+`-- Only the 10 current-best rows are kept in memory while scanning,
+-- instead of sorting all 100,000.
+select * from orders order by total desc limit 10;` },
+
+  { group: 'Sorting', title: 'External merge sort — spilling to disk', sql:
+`-- Sorting ~200k rows by a computed key exceeds work_mem (4 MB here),
+-- so the sort runs as an on-disk merge. Amber warning expected.
+select * from order_items
+order by md5(order_id::text || line_no::text);` },
+
+  { group: 'Sorting', title: 'Incremental sort — finishing a partial order', sql:
+`-- The index provides customer_id order; only ties need sorting by total.
+select * from orders order by customer_id, total limit 20;` },
+
+  { group: 'Grouping', title: 'HashAggregate — GROUP BY via hash table', sql:
+`-- Three groups, built in a hash table; input order is irrelevant.
+select status, count(*), avg(total) from orders group by status;` },
+
+  { group: 'Grouping', title: 'GroupAggregate — GROUP BY over sorted input', sql:
+`-- The index delivers customer_id in order, so each group completes as
+-- soon as the key changes — and the LIMIT can stop the scan early.
+select customer_id, count(*) from orders
+group by customer_id
+order by customer_id
+limit 10;` },
+
+  { group: 'Grouping', title: 'DISTINCT via Unique node', sql:
+`-- Sorted input from the index means duplicates are adjacent —
+-- the Unique node just skips repeats.
+select distinct customer_id from orders order by customer_id limit 10;` },
+
+  { group: 'Grouping', title: 'Window function — rank within partitions', sql:
+`-- WindowAgg needs rows ordered by (status, total desc); an index
+-- provides part of it, Incremental Sort finishes the job.
+select id, status, total,
+       rank() over (partition by status order by total desc)
+from orders
+limit 20;` },
+
+  { group: 'CTEs & subqueries', title: 'Materialized CTE — computed once, then scanned', sql:
+`-- AS MATERIALIZED forces the CTE to be computed and stored;
+-- the outer query reads it via a CTE Scan and filters afterwards.
+with spend as materialized (
+  select customer_id, sum(total) as total_spend
+  from orders group by customer_id
+)
+select * from spend where total_spend > 1000 limit 5;` },
+
+  { group: 'CTEs & subqueries', title: 'Inlined CTE — same query, no fence', sql:
+`-- Without MATERIALIZED, Postgres (12+) inlines the CTE into the outer
+-- query. Compare: no CTE Scan node, and the filter is a HAVING inside
+-- the aggregate.
+with spend as (
+  select customer_id, sum(total) as total_spend
+  from orders group by customer_id
+)
+select * from spend where total_spend > 1000 limit 5;` },
+
+  { group: 'CTEs & subqueries', title: 'Recursive CTE — iterate until fixpoint', sql:
+`-- Recursive Union runs the seed once, then loops the recursive term
+-- against the working table. WorkTable Scan shows 100 iterations.
+with recursive t(n) as (
+  values (1)
+  union all
+  select n + 1 from t where n < 100
+)
+select sum(n) from t;` },
+
+  { group: 'Partitions & sets', title: 'Partition pruning — untouched partitions vanish', sql:
+`-- The WHERE clause proves only events_2026 can match, so events_2025
+-- never appears in the plan at all.
+select kind, count(*) from events
+where occurred_on >= '2026-01-01'
+group by kind;` },
+
+  { group: 'Partitions & sets', title: 'Append — reading multiple partitions', sql:
+`-- This range spans both partitions: each surviving partition becomes
+-- one child of the Append node.
+select kind, count(*) from events
+where occurred_on between '2025-11-01' and '2026-03-01'
+group by kind;` },
+
+  { group: 'Partitions & sets', title: 'EXCEPT via SetOp', sql:
+`-- Countries with platinum customers but no gold ones.
+select country from customers where tier = 'platinum'
+except
+select country from customers where tier = 'gold';` },
+
+  { group: 'Partitions & sets', title: 'VALUES list joined to a real table', sql:
+`-- An inline table in the query itself, hashed and probed like any other.
+select v.code, count(o.id)
+from (values ('pending'), ('cancelled')) v(code)
+join orders o on o.status = v.code
+group by v.code;` },
+
+  { group: 'Planner pitfalls', title: 'Correlated predicates — why estimates go wrong', sql:
+`-- The planner multiplies the selectivities of the two conditions as if
+-- they were independent. Compare estimated vs actual rows on the scan.
+select count(*) from orders
+where status = 'cancelled' and id % 50 = 0;` },
+
+  { group: 'Planner pitfalls', title: 'Function scan — the planner is guessing', sql:
+`-- Postgres has no statistics for a function's output. Estimates for
+-- set-returning functions are essentially hard-coded guesses.
+select max(x) from generate_series(1, 5000) g(x);` },
+];
+
+EXAMPLES.push(
+  { group: 'Vector search (pgvector)', title: 'HNSW index — approximate nearest neighbour', sql:
+`-- The <-> (L2 distance) ORDER BY + LIMIT pattern is what HNSW serves.
+-- Note "Order By" on the Index Scan: the index returns rows in
+-- (approximate) distance order, so no Sort node is needed.
+select id, topic, embedding <-> '[1,2,3,4,5,6,1,2]' as distance
+from doc_embeddings
+order by embedding <-> '[1,2,3,4,5,6,1,2]'
+limit 5;` },
+
+  { group: 'Vector search (pgvector)', title: 'Exact search — same query, no index', sql:
+`-- With the index disabled you get the exact answer: a full scan
+-- computing 4,000 distances, then a top-N heapsort. Compare the
+-- results with the HNSW example — approximate means approximate.
+set enable_indexscan = off;
+select id, topic, embedding <-> '[1,2,3,4,5,6,1,2]' as distance
+from doc_embeddings
+order by embedding <-> '[1,2,3,4,5,6,1,2]'
+limit 5;` },
+
+  { group: 'Vector search (pgvector)', title: 'Filtered ANN — the post-filter gotcha', sql:
+`-- The WHERE clause is applied *after* the index returns candidates in
+-- distance order. Watch "Rows Removed by Filter": with a selective
+-- filter, HNSW walks more of the graph — and can even return fewer
+-- rows than your LIMIT asked for.
+select id, topic, embedding <-> '[1,2,3,4,5,6,1,2]' as distance
+from doc_embeddings
+where topic = 'kafka'
+order by embedding <-> '[1,2,3,4,5,6,1,2]'
+limit 5;` }
+);
+
+
+
+// ---- App state -------------------------------------------------------------
+let db = null;
+let dbSource = null; // 'example' | 'file'
+let building = false;
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+
+function setStatus(msg, isErr) {
+  statusEl.textContent = msg || "";
+  statusEl.classList.toggle("err", !!isErr);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ---- Database lifecycle ----------------------------------------------------
+async function freshDb() {
+  if (db) { try { await db.close(); } catch (e) {} }
+  db = new PGlite({ extensions: { vector } });
+  const v = await db.query("select version()");
+  const m = /PostgreSQL [\d.]+ \(PGlite [\d.]+\)/.exec(v.rows[0].version);
+  $("pgver").textContent = m ? m[0] : "PostgreSQL (PGlite)";
+  await db.exec("set jit = off");
+}
+
+async function loadExampleDb() {
+  if (building) return;
+  building = true;
+  $("loadExample").disabled = true;
+  try {
+    await freshDb();
+    for (const [label, sql] of EXAMPLE_DB_STEPS) {
+      setStatus(label + "\u2026");
+      await db.exec(sql);
+      await new Promise((r) => setTimeout(r, 0)); // let the status paint
+    }
+    setStatus("Analyzing tables\u2026");
+    await db.exec("vacuum analyze");
+    dbSource = "example";
+    setStatus("Example database ready \u2014 pick an example query or write your own.");
+    populateExamples();
+    await showSchema();
+    $("editorbox").hidden = false;
+    if (!$("sql").value.trim()) selectExample(0);
+  } catch (e) {
+    setStatus("Failed to build example database: " + e.message, true);
+  } finally {
+    building = false;
+    $("loadExample").disabled = false;
+  }
+}
+
+async function loadSqlFile(file) {
+  if (building) return;
+  building = true;
+  try {
+    setStatus("Reading " + file.name + "\u2026");
+    const text = await file.text();
+    if (/^copy\s.+from\s+stdin/im.test(text)) {
+      setStatus("This file uses COPY \u2026 FROM stdin (pg_dump\u2019s default). Re-export with pg_dump --inserts and try again.", true);
+      return;
+    }
+    await freshDb();
+    const stmts = splitStatements(text);
+    let done = 0;
+    for (const s of stmts) {
+      const head = stripLeadingComments(s).slice(0, 60);
+      if (/^(\\|set\s+.*ownership|comment\s+on)/i.test(head)) continue; // skip psql meta / noise
+      try { await db.exec(s); } catch (e) {
+        setStatus("Statement " + (done + 1) + " failed: " + e.message + "\n> " + head + "\u2026", true);
+        return;
+      }
+      done++;
+      if (done % 25 === 0) { setStatus("Executed " + done + "/" + stmts.length + " statements\u2026"); await new Promise((r) => setTimeout(r, 0)); }
+    }
+    await db.exec("analyze");
+    dbSource = "file";
+    history.replaceState(null, "", location.pathname);
+    $("examplePicker").hidden = true;
+    setStatus(file.name + " loaded (" + done + " statements). Schema below \u2014 write a query against it.");
+    await showSchema();
+    $("editorbox").hidden = false;
+    $("sql").value = "select table_name, table_type from information_schema.tables\nwhere table_schema = 'public' order by 1;";
+  } finally {
+    building = false;
+  }
+}
+
+async function showSchema() {
+  const cols = await db.query(`
+    select c.table_name, c.column_name, c.data_type
+    from information_schema.columns c
+    join information_schema.tables t
+      on t.table_schema = c.table_schema and t.table_name = c.table_name
+    where c.table_schema = 'public' and t.table_type = 'BASE TABLE'
+    order by c.table_name, c.ordinal_position`);
+  const counts = await db.query(`
+    select relname, coalesce(n_live_tup, 0) as n
+    from pg_stat_user_tables`);
+  const cntMap = Object.fromEntries(counts.rows.map((r) => [r.relname, r.n]));
+  const byTable = {};
+  for (const r of cols.rows) (byTable[r.table_name] ||= []).push(r);
+  const host = $("schema");
+  host.innerHTML = "";
+  for (const [tbl, cs] of Object.entries(byTable)) {
+    const d = document.createElement("div");
+    d.className = "schematbl";
+    d.innerHTML = "<b>" + esc(tbl) + (cntMap[tbl] !== undefined ? " <span>(" + Number(cntMap[tbl]).toLocaleString() + " rows)</span>" : "") + "</b>" +
+      cs.map((c) => "<div>" + esc(c.column_name) + " <span>" + esc(c.data_type) + "</span></div>").join("");
+    host.appendChild(d);
+  }
+  $("schemaSection").hidden = false;
+}
+
+// ---- Examples --------------------------------------------------------------
+function populateExamples() {
+  const sel = $("examplePicker");
+  sel.innerHTML = "<option value=''>Example queries\u2026</option>";
+  let lastGroup = null, og = null;
+  EXAMPLES.forEach((ex, i) => {
+    if (ex.group !== lastGroup) { og = document.createElement("optgroup"); og.label = ex.group; sel.appendChild(og); lastGroup = ex.group; }
+    const o = document.createElement("option");
+    o.value = String(i); o.textContent = ex.title;
+    og.appendChild(o);
+  });
+  sel.hidden = false;
+}
+
+function selectExample(i) {
+  $("sql").value = EXAMPLES[i].sql;
+  $("examplePicker").value = String(i);
+}
+
+$("examplePicker").addEventListener("change", (e) => {
+  if (e.target.value === "") return;
+  selectExample(Number(e.target.value));
+  runQuery();
+});
+
+// ---- Running & rendering ---------------------------------------------------
+function isMutation(stmt) {
+  return /^(insert|update|delete|merge|create|alter|drop|truncate|vacuum|analyze|copy|grant|revoke|comment)\b/i.test(stripLeadingComments(stmt));
+}
+
+async function runQuery() {
+  if (!db || building) return;
+  const script = $("sql").value;
+  const stmts = splitStatements(script);
+  if (!stmts.length) return;
+  $("run").disabled = true;
+  setStatus("");
+  const t0 = performance.now();
+  try {
+    await db.exec("reset all");
+    const last = stmts[stmts.length - 1];
+    for (const s of stmts.slice(0, -1)) await db.exec(s);
+
+    if (!isExplainable(last)) {
+      // DDL etc: just run it.
+      const r = await db.exec(last);
+      renderResults({ rows: [], fields: [] }, "Statement executed (" + fmtMs(performance.now() - t0) + ").");
+      $("planSection").hidden = true;
+      if (dbSource) await showSchema();
+      return;
+    }
+
+    let res = null;
+    const mutating = isMutation(last);
+    if (!mutating) res = await db.query(last);
+    const exp = await db.query("explain (analyze, buffers, format json) " + last);
+    const qp = exp.rows[0]["QUERY PLAN"][0];
+    const wall = performance.now() - t0;
+
+    renderPlan(qp);
+    if (mutating) {
+      renderResults({ rows: [], fields: [] },
+        "Write statement executed once under EXPLAIN ANALYZE" +
+        (qp["Plan"] && qp["Plan"]["Actual Rows"] !== undefined ? "" : "") + ".");
+    } else {
+      renderResults(res, null);
+    }
+    $("timing").textContent =
+      "planning " + fmtMs(qp["Planning Time"]) + " \u00b7 execution " + fmtMs(qp["Execution Time"]) + " \u00b7 total " + fmtMs(wall);
+
+    if (dbSource === "example") {
+      history.replaceState(null, "", "#sql=" + encodeURIComponent(script));
+    }
+  } catch (e) {
+    setStatus(e.message, true);
+    $("planSection").hidden = true;
+    $("resultSection").hidden = true;
+    $("timing").textContent = "";
+  } finally {
+    await db.exec("reset all").catch(() => {});
+    $("run").disabled = false;
+  }
+}
+
+function renderPlan(qp) {
+  const ann = annotatePlan(qp["Plan"], qp["Planning Time"]);
+  $("summary").textContent = planSummary(ann) || "Plan executed.";
+  renderLegend(ann.tree);
+  const host = $("plan");
+  host.innerHTML = "";
+  host.appendChild(renderNode(ann.tree));
+  $("rawjson").textContent = JSON.stringify(qp, null, 2);
+  $("planSection").hidden = false;
+}
+
+// Colour key — only the operation families that appear in this plan.
+function renderLegend(tree) {
+  const present = new Set();
+  (function fl(n) { present.add(n.category); n.children.forEach(fl); })(tree);
+  const items = CATEGORY_META.filter(([k]) => present.has(k));
+  const host = $("legend");
+  host.innerHTML = "<span class='leglabel'>Operation types</span>" + items.map(([k, label, desc]) =>
+    "<span class='legkey' title='" + esc(desc) + "'><span class='sw' style='background:var(--cat-" + k + ")'></span>" + esc(label) + "</span>").join("");
+  host.hidden = items.length === 0;
+}
+
+function renderNode(n) {
+  const frag = document.createDocumentFragment();
+  const card = document.createElement("div");
+  card.className = "node";
+  card.style.borderLeft = "3px solid var(--cat-" + n.category + ")";
+  const rowsBits = [];
+  if (n.estRows !== undefined) {
+    const off = n.actRows !== undefined && (Math.max(n.estRows, n.actRows) + 1) / (Math.min(n.estRows, n.actRows) + 1) >= 10;
+    rowsBits.push("rows: planned " + fmtNum(n.estRows) +
+      (n.actRows !== undefined ? " \u2192 actual <span class='" + (off ? "off" : "") + "'>" + fmtNum(n.actRows) + "</span>" : "") +
+      (n.loops > 1 ? " \u00d7 " + fmtNum(n.loops) + " loops = " + fmtNum(n.totalActRows) + " total" : ""));
+  }
+  if (n.totalCost !== undefined) rowsBits.push("cost " + n.startupCost + "\u2026" + n.totalCost);
+  card.innerHTML =
+    (n.parentRel ? "<span class='rel'>" + esc(n.parentRel) + "</span>" : "") +
+    "<div class='nhead'><span class='nbadge' style='background:var(--cat-" + n.category + ")'>" + esc(n.title) + "</span>" +
+    (n.target ? "<span class='ntarget'>" + esc(n.target) + "</span>" : "") +
+    "<span class='ntime'>" + fmtMs(n.selfTime) + " self \u00b7 " + Math.round(n.selfPct) + "%</span></div>" +
+    "<div class='tbar'><i style='width:" + Math.max(0.5, n.selfPct) + "%'></i></div>" +
+    "<div class='nrows'>" + rowsBits.join(" \u00b7 ") + "</div>" +
+    "<div class='nwhat'>" + esc(n.what) + "</div>" +
+    (n.detail ? "<div class='ndetail'>" + esc(n.detail) + "</div>" : "") +
+    (n.insights.length ? "<ul class='ins'>" + n.insights.map((i) =>
+      "<li class='" + i.level + "'>" + esc(i.text) + "</li>").join("") + "</ul>" : "");
+  frag.appendChild(card);
+  if (n.children.length) {
+    const kids = document.createElement("div");
+    kids.className = "kids";
+    n.children.forEach((k) => kids.appendChild(renderNode(k)));
+    frag.appendChild(kids);
+  }
+  return frag;
+}
+
+const ROW_CAP = 200;
+function renderResults(res, note) {
+  const tbl = $("results");
+  tbl.innerHTML = "";
+  if (res.fields && res.fields.length) {
+    const thead = "<tr>" + res.fields.map((f) => "<th>" + esc(f.name) + "</th>").join("") + "</tr>";
+    const rows = res.rows.slice(0, ROW_CAP).map((r) =>
+      "<tr>" + res.fields.map((f) => "<td>" + esc(r[f.name] === null ? "\u2205" : r[f.name]) + "</td>").join("") + "</tr>").join("");
+    tbl.innerHTML = thead + rows;
+  }
+  $("rowcount").textContent = note ? note :
+    res.rows.length + " row" + (res.rows.length === 1 ? "" : "s") +
+    (res.rows.length > ROW_CAP ? " (showing first " + ROW_CAP + ")" : "");
+  $("resultSection").hidden = false;
+}
+
+// ---- Wiring ----------------------------------------------------------------
+$("loadExample").addEventListener("click", () => loadExampleDb());
+$("openFile").addEventListener("click", () => { $("filehint").hidden = false; $("filePicker").click(); });
+$("filePicker").addEventListener("change", (e) => { if (e.target.files[0]) loadSqlFile(e.target.files[0]); });
+$("run").addEventListener("click", runQuery);
+$("sql").addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runQuery(); }
+});
+$("annotToggle").addEventListener("change", (e) => document.body.classList.toggle("compact", !e.target.checked));
+
+// Dark / light theme toggle. Initial theme is set by the inline <head> script.
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  const btn = $("themeToggle");
+  btn.textContent = t === "dark" ? "☀️" : "🌙";
+  btn.title = t === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  try { localStorage.setItem("pqe-theme", t); } catch (e) {}
+}
+applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+$("themeToggle").addEventListener("click", () =>
+  applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+
+// Bookmarked queries (#sql=...) — example database only.
+async function handleHash(initial) {
+  const m = /^#sql=(.+)$/.exec(location.hash);
+  if (!m) return false;
+  const sql = decodeURIComponent(m[1]);
+  if (dbSource !== "example") await loadExampleDb();
+  $("sql").value = sql;
+  const idx = EXAMPLES.findIndex((ex) => ex.sql.trim() === sql.trim());
+  $("examplePicker").value = idx >= 0 ? String(idx) : "";
+  await runQuery();
+  return true;
+}
+window.addEventListener("hashchange", () => handleHash(false));
+handleHash(true).then((had) => { if (!had) setStatus("Load the example database to explore, or open your own .sql dump."); });
+</script>
+</body>
+</html>

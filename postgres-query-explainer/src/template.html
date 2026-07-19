@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postgres Query Explainer</title>
+<script>
+  // Set the theme before first paint to avoid a flash of the wrong colours.
+  (function () {
+    try {
+      var t = localStorage.getItem("pqe-theme");
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { document.documentElement.setAttribute("data-theme", "light"); }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f6f7;
+    --panel: #ffffff;
+    --panel-2: #fafcfd;
+    --ink: #16232b;
+    --muted: #5a7184;
+    --pg: #336791;
+    --pg-text: #336791;
+    --pg-soft: #e3ecf3;
+    --amber: #b45309;
+    --amber-soft: #fdf1e3;
+    --line: #d6dee3;
+    /* Operation-type colours (colour key). Paired with white badge text; same in both themes. */
+    --cat-scan: #336791;
+    --cat-join: #7c3aed;
+    --cat-aggregate: #1f7a4d;
+    --cat-sort: #b45309;
+    --cat-combine: #0e7490;
+    --cat-buffer: #b83280;
+    --cat-modify: #b91c1c;
+    --cat-control: #5b6b78;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --disp: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f171d;
+    --panel: #18232b;
+    --panel-2: #1e2b34;
+    --ink: #dbe7ee;
+    --muted: #90a7b6;
+    --pg: #3f82b3;
+    --pg-text: #6fb0e0;
+    --pg-soft: #1d3546;
+    --amber: #eaa23e;
+    --amber-soft: #382712;
+    --line: #2a3a45;
+  }
+  html { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--disp); font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  h1 .kw { color: var(--pg-text); }
+  .tagline { color: var(--muted); margin: 0 0 18px; max-width: 72ch; }
+  .tagline a { color: var(--pg-text); }
+  .pgver { font-family: var(--mono); font-size: 12px; color: var(--pg-text); background: var(--pg-soft); border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
+  .theme-toggle { margin-left: auto; align-self: center; padding: 6px 10px; font-size: 15px; line-height: 1; }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  button {
+    font-family: var(--disp); font-size: 14px; font-weight: 500;
+    padding: 8px 16px; border-radius: 6px; border: 1px solid var(--pg);
+    background: var(--pg); color: #fff; cursor: pointer;
+  }
+  button.secondary { background: var(--panel); color: var(--pg-text); }
+  input[type="checkbox"] { accent-color: var(--pg); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--pg); outline-offset: 2px;
+  }
+  select {
+    font-family: var(--disp); font-size: 14px; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink);
+    max-width: 100%;
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  #status { font-family: var(--mono); font-size: 13px; color: var(--muted); min-height: 20px; margin-bottom: 10px; white-space: pre-wrap; }
+  #status.err { color: var(--amber); }
+
+  .editorbox { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  textarea {
+    display: block; width: 100%; min-height: 150px; padding: 14px 16px; border: 0; resize: vertical;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.55; color: var(--ink); background: var(--panel);
+    tab-size: 2;
+  }
+  .editorbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+  .editorbar .spacer { flex: 1; }
+  #timing { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  label.toggle { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+
+  section { margin-top: 26px; }
+  h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  #summary { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--pg); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; }
+
+  /* Operation-type colour key */
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-bottom: 14px; font-size: 12.5px; color: var(--muted); }
+  .legend .leglabel { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .legend .legkey { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+  /* Plan tree */
+  .node { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px 10px; margin-bottom: 10px; }
+  .node .rel { position: absolute; top: -9px; left: 12px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--bg); padding: 0 6px; }
+  .nhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .nbadge { font-family: var(--mono); font-weight: 500; font-size: 13.5px; color: #fff; background: var(--pg); border-radius: 4px; padding: 2px 8px; }
+  .ntarget { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+  .ntime { margin-left: auto; font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  .tbar { height: 3px; background: var(--pg-soft); border-radius: 2px; margin: 8px 0 8px; overflow: hidden; }
+  .tbar > i { display: block; height: 100%; background: var(--pg); }
+  .nrows { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+  .nrows .off { color: var(--amber); font-weight: 500; }
+  .nwhat { margin: 2px 0 2px; }
+  .ndetail { color: var(--muted); font-size: 14px; margin: 2px 0 6px; max-width: 82ch; }
+  .ins { list-style: none; margin: 6px 0 2px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  .ins li { font-size: 13.5px; padding-left: 18px; position: relative; max-width: 88ch; }
+  .ins li::before { content: "\2013"; position: absolute; left: 4px; color: var(--muted); }
+  .ins li.warn { color: var(--amber); background: var(--amber-soft); border-radius: 4px; padding: 4px 8px 4px 22px; }
+  .ins li.warn::before { content: "\26a0"; left: 6px; color: var(--amber); }
+  .ins li.cond { font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+  .ins li.buf { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .kids { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 14px; }
+  body.compact .nwhat, body.compact .ndetail, body.compact .ins li:not(.warn):not(.cond) { display: none; }
+
+  /* Results table */
+  .tblwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+  th { background: var(--panel-2); font-weight: 500; color: var(--pg-text); position: sticky; top: 0; }
+  tr:last-child td { border-bottom: 0; }
+  .rowcount { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  details.raw { margin-top: 14px; }
+  details.raw summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
+  details.raw pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; }
+
+  /* Schema */
+  .schema { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .schematbl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; }
+  .schematbl b { color: var(--pg-text); font-weight: 500; display: block; margin-bottom: 4px; }
+  .schematbl span { color: var(--muted); }
+  .schematbl div { line-height: 1.6; }
+
+  footer { margin-top: 48px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+  footer a { color: var(--pg-text); }
+  @media (prefers-reduced-motion: no-preference) {
+    .tbar > i { transition: width 0.4s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="kw">EXPLAIN</span>, explained</h1>
+    <span class="pgver" id="pgver">starting Postgres&hellip;</span>
+    <button id="themeToggle" class="secondary theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+  </header>
+  <p class="tagline">A PostgreSQL query explainer that runs entirely in your browser (via <a href="https://pglite.dev">PGlite</a>, real Postgres compiled to WASM). Run a query and get its <code>EXPLAIN ANALYZE</code> plan back as an annotated tree: what each step does, where the time went, and where the planner guessed wrong.</p>
+
+  <div class="controls">
+    <button id="loadExample">Load example database</button>
+    <button id="openFile" class="secondary">Open a .sql file</button>
+    <input type="file" id="filePicker" accept=".sql,text/plain" hidden>
+    <select id="examplePicker" hidden aria-label="Example queries"></select>
+  </div>
+  <div class="hint" id="filehint" hidden>Plain SQL only (CREATE TABLE + INSERT statements). For an existing database use <code>pg_dump --inserts --no-owner --no-privileges</code> &mdash; the default COPY format isn&rsquo;t supported here.</div>
+  <div id="status"></div>
+
+  <div class="editorbox" id="editorbox" hidden>
+    <textarea id="sql" spellcheck="false" aria-label="SQL query" placeholder="-- Write SQL here. Multiple statements are allowed; the last one is explained."></textarea>
+    <div class="editorbar">
+      <button id="run">Run &amp; explain</button>
+      <span class="hint">Ctrl+Enter</span>
+      <span class="spacer"></span>
+      <label class="toggle"><input type="checkbox" id="annotToggle" checked> annotations</label>
+      <span id="timing"></span>
+    </div>
+  </div>
+
+  <section id="schemaSection" hidden>
+    <h2>Schema</h2>
+    <div class="schema" id="schema"></div>
+  </section>
+
+  <section id="planSection" hidden>
+    <h2>Query plan &mdash; annotated</h2>
+    <div id="summary"></div>
+    <div class="legend" id="legend" hidden></div>
+    <div id="plan"></div>
+    <details class="raw"><summary>Raw EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) output</summary><pre id="rawjson"></pre></details>
+  </section>
+
+  <section id="resultSection" hidden>
+    <h2>Results</h2>
+    <div class="tblwrap"><table id="results"></table></div>
+    <div class="rowcount" id="rowcount"></div>
+  </section>
+
+  <footer>
+    Everything runs locally in this page; nothing leaves your browser. Queries are executed for real (once for results, once under <code>EXPLAIN ANALYZE</code> for read-only statements; writes run once, under <code>EXPLAIN ANALYZE</code>).
+    Inspired by <a href="https://tools.simonwillison.net/sqlite-query-explainer">Simon Willison&rsquo;s SQLite Query Explainer</a>.
+    Reference: <a href="https://www.postgresql.org/docs/current/using-explain.html">Using EXPLAIN</a> &middot; <a href="https://www.pgmustard.com/docs/explain">pgMustard glossary</a>.
+    Note: this is single-process Postgres &mdash; no parallel workers, and timings differ from a real server.
+  </footer>
+</div>
+
+<script type="module">
+import { PGlite } from "https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.5.4/dist/index.js";
+import { vector } from "https://cdn.jsdelivr.net/npm/@electric-sql/pglite-pgvector@0.0.5/dist/index.js";
+
+//@@INLINE planlogic.js
+//@@INLINE exampledb.js
+
+// ---- App state -------------------------------------------------------------
+let db = null;
+let dbSource = null; // 'example' | 'file'
+let building = false;
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+
+function setStatus(msg, isErr) {
+  statusEl.textContent = msg || "";
+  statusEl.classList.toggle("err", !!isErr);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ---- Database lifecycle ----------------------------------------------------
+async function freshDb() {
+  if (db) { try { await db.close(); } catch (e) {} }
+  db = new PGlite({ extensions: { vector } });
+  const v = await db.query("select version()");
+  const m = /PostgreSQL [\d.]+ \(PGlite [\d.]+\)/.exec(v.rows[0].version);
+  $("pgver").textContent = m ? m[0] : "PostgreSQL (PGlite)";
+  await db.exec("set jit = off");
+}
+
+async function loadExampleDb() {
+  if (building) return;
+  building = true;
+  $("loadExample").disabled = true;
+  try {
+    await freshDb();
+    for (const [label, sql] of EXAMPLE_DB_STEPS) {
+      setStatus(label + "\u2026");
+      await db.exec(sql);
+      await new Promise((r) => setTimeout(r, 0)); // let the status paint
+    }
+    setStatus("Analyzing tables\u2026");
+    await db.exec("vacuum analyze");
+    dbSource = "example";
+    setStatus("Example database ready \u2014 pick an example query or write your own.");
+    populateExamples();
+    await showSchema();
+    $("editorbox").hidden = false;
+    if (!$("sql").value.trim()) selectExample(0);
+  } catch (e) {
+    setStatus("Failed to build example database: " + e.message, true);
+  } finally {
+    building = false;
+    $("loadExample").disabled = false;
+  }
+}
+
+async function loadSqlFile(file) {
+  if (building) return;
+  building = true;
+  try {
+    setStatus("Reading " + file.name + "\u2026");
+    const text = await file.text();
+    if (/^copy\s.+from\s+stdin/im.test(text)) {
+      setStatus("This file uses COPY \u2026 FROM stdin (pg_dump\u2019s default). Re-export with pg_dump --inserts and try again.", true);
+      return;
+    }
+    await freshDb();
+    const stmts = splitStatements(text);
+    let done = 0;
+    for (const s of stmts) {
+      const head = stripLeadingComments(s).slice(0, 60);
+      if (/^(\\|set\s+.*ownership|comment\s+on)/i.test(head)) continue; // skip psql meta / noise
+      try { await db.exec(s); } catch (e) {
+        setStatus("Statement " + (done + 1) + " failed: " + e.message + "\n> " + head + "\u2026", true);
+        return;
+      }
+      done++;
+      if (done % 25 === 0) { setStatus("Executed " + done + "/" + stmts.length + " statements\u2026"); await new Promise((r) => setTimeout(r, 0)); }
+    }
+    await db.exec("analyze");
+    dbSource = "file";
+    history.replaceState(null, "", location.pathname);
+    $("examplePicker").hidden = true;
+    setStatus(file.name + " loaded (" + done + " statements). Schema below \u2014 write a query against it.");
+    await showSchema();
+    $("editorbox").hidden = false;
+    $("sql").value = "select table_name, table_type from information_schema.tables\nwhere table_schema = 'public' order by 1;";
+  } finally {
+    building = false;
+  }
+}
+
+async function showSchema() {
+  const cols = await db.query(`
+    select c.table_name, c.column_name, c.data_type
+    from information_schema.columns c
+    join information_schema.tables t
+      on t.table_schema = c.table_schema and t.table_name = c.table_name
+    where c.table_schema = 'public' and t.table_type = 'BASE TABLE'
+    order by c.table_name, c.ordinal_position`);
+  const counts = await db.query(`
+    select relname, coalesce(n_live_tup, 0) as n
+    from pg_stat_user_tables`);
+  const cntMap = Object.fromEntries(counts.rows.map((r) => [r.relname, r.n]));
+  const byTable = {};
+  for (const r of cols.rows) (byTable[r.table_name] ||= []).push(r);
+  const host = $("schema");
+  host.innerHTML = "";
+  for (const [tbl, cs] of Object.entries(byTable)) {
+    const d = document.createElement("div");
+    d.className = "schematbl";
+    d.innerHTML = "<b>" + esc(tbl) + (cntMap[tbl] !== undefined ? " <span>(" + Number(cntMap[tbl]).toLocaleString() + " rows)</span>" : "") + "</b>" +
+      cs.map((c) => "<div>" + esc(c.column_name) + " <span>" + esc(c.data_type) + "</span></div>").join("");
+    host.appendChild(d);
+  }
+  $("schemaSection").hidden = false;
+}
+
+// ---- Examples --------------------------------------------------------------
+function populateExamples() {
+  const sel = $("examplePicker");
+  sel.innerHTML = "<option value=''>Example queries\u2026</option>";
+  let lastGroup = null, og = null;
+  EXAMPLES.forEach((ex, i) => {
+    if (ex.group !== lastGroup) { og = document.createElement("optgroup"); og.label = ex.group; sel.appendChild(og); lastGroup = ex.group; }
+    const o = document.createElement("option");
+    o.value = String(i); o.textContent = ex.title;
+    og.appendChild(o);
+  });
+  sel.hidden = false;
+}
+
+function selectExample(i) {
+  $("sql").value = EXAMPLES[i].sql;
+  $("examplePicker").value = String(i);
+}
+
+$("examplePicker").addEventListener("change", (e) => {
+  if (e.target.value === "") return;
+  selectExample(Number(e.target.value));
+  runQuery();
+});
+
+// ---- Running & rendering ---------------------------------------------------
+function isMutation(stmt) {
+  return /^(insert|update|delete|merge|create|alter|drop|truncate|vacuum|analyze|copy|grant|revoke|comment)\b/i.test(stripLeadingComments(stmt));
+}
+
+async function runQuery() {
+  if (!db || building) return;
+  const script = $("sql").value;
+  const stmts = splitStatements(script);
+  if (!stmts.length) return;
+  $("run").disabled = true;
+  setStatus("");
+  const t0 = performance.now();
+  try {
+    await db.exec("reset all");
+    const last = stmts[stmts.length - 1];
+    for (const s of stmts.slice(0, -1)) await db.exec(s);
+
+    if (!isExplainable(last)) {
+      // DDL etc: just run it.
+      const r = await db.exec(last);
+      renderResults({ rows: [], fields: [] }, "Statement executed (" + fmtMs(performance.now() - t0) + ").");
+      $("planSection").hidden = true;
+      if (dbSource) await showSchema();
+      return;
+    }
+
+    let res = null;
+    const mutating = isMutation(last);
+    if (!mutating) res = await db.query(last);
+    const exp = await db.query("explain (analyze, buffers, format json) " + last);
+    const qp = exp.rows[0]["QUERY PLAN"][0];
+    const wall = performance.now() - t0;
+
+    renderPlan(qp);
+    if (mutating) {
+      renderResults({ rows: [], fields: [] },
+        "Write statement executed once under EXPLAIN ANALYZE" +
+        (qp["Plan"] && qp["Plan"]["Actual Rows"] !== undefined ? "" : "") + ".");
+    } else {
+      renderResults(res, null);
+    }
+    $("timing").textContent =
+      "planning " + fmtMs(qp["Planning Time"]) + " \u00b7 execution " + fmtMs(qp["Execution Time"]) + " \u00b7 total " + fmtMs(wall);
+
+    if (dbSource === "example") {
+      history.replaceState(null, "", "#sql=" + encodeURIComponent(script));
+    }
+  } catch (e) {
+    setStatus(e.message, true);
+    $("planSection").hidden = true;
+    $("resultSection").hidden = true;
+    $("timing").textContent = "";
+  } finally {
+    await db.exec("reset all").catch(() => {});
+    $("run").disabled = false;
+  }
+}
+
+function renderPlan(qp) {
+  const ann = annotatePlan(qp["Plan"], qp["Planning Time"]);
+  $("summary").textContent = planSummary(ann) || "Plan executed.";
+  renderLegend(ann.tree);
+  const host = $("plan");
+  host.innerHTML = "";
+  host.appendChild(renderNode(ann.tree));
+  $("rawjson").textContent = JSON.stringify(qp, null, 2);
+  $("planSection").hidden = false;
+}
+
+// Colour key — only the operation families that appear in this plan.
+function renderLegend(tree) {
+  const present = new Set();
+  (function fl(n) { present.add(n.category); n.children.forEach(fl); })(tree);
+  const items = CATEGORY_META.filter(([k]) => present.has(k));
+  const host = $("legend");
+  host.innerHTML = "<span class='leglabel'>Operation types</span>" + items.map(([k, label, desc]) =>
+    "<span class='legkey' title='" + esc(desc) + "'><span class='sw' style='background:var(--cat-" + k + ")'></span>" + esc(label) + "</span>").join("");
+  host.hidden = items.length === 0;
+}
+
+function renderNode(n) {
+  const frag = document.createDocumentFragment();
+  const card = document.createElement("div");
+  card.className = "node";
+  card.style.borderLeft = "3px solid var(--cat-" + n.category + ")";
+  const rowsBits = [];
+  if (n.estRows !== undefined) {
+    const off = n.actRows !== undefined && (Math.max(n.estRows, n.actRows) + 1) / (Math.min(n.estRows, n.actRows) + 1) >= 10;
+    rowsBits.push("rows: planned " + fmtNum(n.estRows) +
+      (n.actRows !== undefined ? " \u2192 actual <span class='" + (off ? "off" : "") + "'>" + fmtNum(n.actRows) + "</span>" : "") +
+      (n.loops > 1 ? " \u00d7 " + fmtNum(n.loops) + " loops = " + fmtNum(n.totalActRows) + " total" : ""));
+  }
+  if (n.totalCost !== undefined) rowsBits.push("cost " + n.startupCost + "\u2026" + n.totalCost);
+  card.innerHTML =
+    (n.parentRel ? "<span class='rel'>" + esc(n.parentRel) + "</span>" : "") +
+    "<div class='nhead'><span class='nbadge' style='background:var(--cat-" + n.category + ")'>" + esc(n.title) + "</span>" +
+    (n.target ? "<span class='ntarget'>" + esc(n.target) + "</span>" : "") +
+    "<span class='ntime'>" + fmtMs(n.selfTime) + " self \u00b7 " + Math.round(n.selfPct) + "%</span></div>" +
+    "<div class='tbar'><i style='width:" + Math.max(0.5, n.selfPct) + "%'></i></div>" +
+    "<div class='nrows'>" + rowsBits.join(" \u00b7 ") + "</div>" +
+    "<div class='nwhat'>" + esc(n.what) + "</div>" +
+    (n.detail ? "<div class='ndetail'>" + esc(n.detail) + "</div>" : "") +
+    (n.insights.length ? "<ul class='ins'>" + n.insights.map((i) =>
+      "<li class='" + i.level + "'>" + esc(i.text) + "</li>").join("") + "</ul>" : "");
+  frag.appendChild(card);
+  if (n.children.length) {
+    const kids = document.createElement("div");
+    kids.className = "kids";
+    n.children.forEach((k) => kids.appendChild(renderNode(k)));
+    frag.appendChild(kids);
+  }
+  return frag;
+}
+
+const ROW_CAP = 200;
+function renderResults(res, note) {
+  const tbl = $("results");
+  tbl.innerHTML = "";
+  if (res.fields && res.fields.length) {
+    const thead = "<tr>" + res.fields.map((f) => "<th>" + esc(f.name) + "</th>").join("") + "</tr>";
+    const rows = res.rows.slice(0, ROW_CAP).map((r) =>
+      "<tr>" + res.fields.map((f) => "<td>" + esc(r[f.name] === null ? "\u2205" : r[f.name]) + "</td>").join("") + "</tr>").join("");
+    tbl.innerHTML = thead + rows;
+  }
+  $("rowcount").textContent = note ? note :
+    res.rows.length + " row" + (res.rows.length === 1 ? "" : "s") +
+    (res.rows.length > ROW_CAP ? " (showing first " + ROW_CAP + ")" : "");
+  $("resultSection").hidden = false;
+}
+
+// ---- Wiring ----------------------------------------------------------------
+$("loadExample").addEventListener("click", () => loadExampleDb());
+$("openFile").addEventListener("click", () => { $("filehint").hidden = false; $("filePicker").click(); });
+$("filePicker").addEventListener("change", (e) => { if (e.target.files[0]) loadSqlFile(e.target.files[0]); });
+$("run").addEventListener("click", runQuery);
+$("sql").addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runQuery(); }
+});
+$("annotToggle").addEventListener("change", (e) => document.body.classList.toggle("compact", !e.target.checked));
+
+// Dark / light theme toggle. Initial theme is set by the inline <head> script.
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  const btn = $("themeToggle");
+  btn.textContent = t === "dark" ? "☀️" : "🌙";
+  btn.title = t === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  try { localStorage.setItem("pqe-theme", t); } catch (e) {}
+}
+applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+$("themeToggle").addEventListener("click", () =>
+  applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+
+// Bookmarked queries (#sql=...) — example database only.
+async function handleHash(initial) {
+  const m = /^#sql=(.+)$/.exec(location.hash);
+  if (!m) return false;
+  const sql = decodeURIComponent(m[1]);
+  if (dbSource !== "example") await loadExampleDb();
+  $("sql").value = sql;
+  const idx = EXAMPLES.findIndex((ex) => ex.sql.trim() === sql.trim());
+  $("examplePicker").value = idx >= 0 ? String(idx) : "";
+  await runQuery();
+  return true;
+}
+window.addEventListener("hashchange", () => handleHash(false));
+handleHash(true).then((had) => { if (!had) setStatus("Load the example database to explore, or open your own .sql dump."); });
+</script>
+</body>
+</html>

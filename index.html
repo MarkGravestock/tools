@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browser Tools</title>
+<meta name="description" content="A collection of small, single-file developer tools that run entirely in your browser.">
+<script>
+  // Set the theme before first paint to avoid a flash of the wrong colours.
+  // Shares the "pqe-theme" key with the individual tools so the choice persists across pages.
+  (function () {
+    try {
+      var t = localStorage.getItem("pqe-theme");
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { document.documentElement.setAttribute("data-theme", "light"); }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f6f7;
+    --panel: #ffffff;
+    --panel-2: #fafcfd;
+    --ink: #16232b;
+    --muted: #5a7184;
+    --pg: #336791;
+    --pg-text: #336791;
+    --pg-soft: #e3ecf3;
+    --amber: #b45309;
+    --line: #d6dee3;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --disp: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f171d;
+    --panel: #18232b;
+    --panel-2: #1e2b34;
+    --ink: #dbe7ee;
+    --muted: #90a7b6;
+    --pg: #3f82b3;
+    --pg-text: #6fb0e0;
+    --pg-soft: #1d3546;
+    --amber: #eaa23e;
+    --line: #2a3a45;
+  }
+  html { color-scheme: light dark; -webkit-text-size-adjust: 100%; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--disp); font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  h1 .kw { color: var(--pg-text); }
+  .tagline { color: var(--muted); margin: 0 0 26px; max-width: 72ch; }
+  .tagline a { color: var(--pg-text); }
+
+  button.theme-toggle {
+    font-family: var(--disp); font-size: 15px; line-height: 1; font-weight: 500;
+    margin-left: auto; align-self: center; padding: 6px 10px; border-radius: 6px;
+    border: 1px solid var(--pg); background: var(--panel); color: var(--pg-text); cursor: pointer;
+  }
+  button.theme-toggle:focus-visible { outline: 2px solid var(--pg); outline-offset: 2px; }
+
+  h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0 0 14px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .card {
+    display: flex; flex-direction: column; gap: 8px;
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--pg);
+    border-radius: 8px; padding: 16px 18px; text-decoration: none; color: inherit;
+    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card:hover, .card:focus-visible {
+    border-color: var(--pg); outline: none; transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(51, 103, 145, 0.14);
+  }
+  .card h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--pg-text); letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 4px; }
+  .tag { font-family: var(--mono); font-size: 11px; color: var(--pg-text); background: var(--pg-soft); border-radius: 4px; padding: 2px 7px; }
+  .go { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .card:hover .go, .card:focus-visible .go { color: var(--pg-text); }
+
+  .empty { color: var(--muted); font-style: italic; }
+
+  footer { margin-top: 48px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+  footer a { color: var(--pg-text); }
+  @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="kw">Browser</span> Tools</h1>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+  </header>
+  <p class="tagline">Small, single-file developer tools that run entirely in your browser &mdash; nothing to install, nothing leaves the page.</p>
+
+  <h2>Tools</h2>
+  <div class="grid" id="grid"></div>
+
+  <footer>
+    Everything here is static and client-side, served straight from this repository via GitHub Pages.
+  </footer>
+</div>
+
+<script>
+  // ---- The tool catalogue ---------------------------------------------------
+  // To add a tool: drop its folder in the repo root and append one entry here.
+  const TOOLS = [
+    {
+      title: "Postgres Query Explainer",
+      href: "postgres-query-explainer/postgres-query-explainer.html",
+      description: "Run a query and get its EXPLAIN (ANALYZE, BUFFERS) plan back as an annotated tree — what each node does, where the time went, and where the planner guessed wrong. Real PostgreSQL compiled to WASM.",
+      tags: ["PostgreSQL", "EXPLAIN", "PGlite", "WASM"],
+    },
+  ];
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  const grid = document.getElementById("grid");
+  if (!TOOLS.length) {
+    grid.innerHTML = "<p class='empty'>No tools yet.</p>";
+  } else {
+    grid.innerHTML = TOOLS.map((t) =>
+      "<a class='card' href='" + esc(t.href) + "'>" +
+        "<h3>" + esc(t.title) + "</h3>" +
+        "<p>" + esc(t.description) + "</p>" +
+        "<div class='tags'>" + (t.tags || []).map((tag) => "<span class='tag'>" + esc(tag) + "</span>").join("") + "</div>" +
+        "<span class='go'>Open &rarr;</span>" +
+      "</a>"
+    ).join("");
+  }
+
+  // ---- Theme toggle (shares the "pqe-theme" key with the tools) -------------
+  function applyTheme(t) {
+    document.documentElement.setAttribute("data-theme", t);
+    const btn = document.getElementById("themeToggle");
+    btn.textContent = t === "dark" ? "☀️" : "🌙";
+    btn.title = t === "dark" ? "Switch to light mode" : "Switch to dark mode";
+    try { localStorage.setItem("pqe-theme", t); } catch (e) {}
+  }
+  applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+  document.getElementById("themeToggle").addEventListener("click", () =>
+    applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+import { readFileSync } from 'fs';
+import { JSDOM } from 'jsdom';
+import { PGlite } from '@electric-sql/pglite';
+import { vector } from '@electric-sql/pglite-pgvector';
+const html = readFileSync(new URL('../postgres-query-explainer.html', import.meta.url), 'utf8');
+const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html);
+let js = m[1].replace(/^import .* from "https:.*$/gm, '');
+const dom = new JSDOM(html.replace(m[1], ''), { url: 'http://localhost/' , runScripts: 'outside-only'});
+const { window } = dom;
+const fn = new Function('PGlite','vector','window','document','history','location','performance',
+  'return (async () => {' + js + '\n; return { runQuery, loadExampleDb, EXAMPLES };})()');
+const api = await fn(PGlite, vector, window, window.document, window.history, window.location, window.performance);
+console.time('build+hnsw'); await api.loadExampleDb(); console.timeEnd('build+hnsw');
+const idx = api.EXAMPLES.findIndex(e => /HNSW index/.test(e.title));
+window.document.getElementById('sql').value = api.EXAMPLES[idx].sql;
+await api.runQuery();
+const conds = [...window.document.querySelectorAll('#plan .ins li.cond')].map(l=>l.textContent);
+console.log('badges:', [...window.document.querySelectorAll('#plan .nbadge')].map(b=>b.textContent).join(' > '));
+console.log('conds:', conds.join(' | '));
+console.log('rows:', window.document.querySelectorAll('#results tr').length - 1);

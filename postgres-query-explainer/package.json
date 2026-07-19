@@ -1,0 +1,17 @@
+{
+  "name": "postgres-query-explainer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node src/build.mjs",
+    "test": "node test/test.mjs",
+    "smoke": "node test/smoke.mjs && node test/smokevec.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.4",
+    "@electric-sql/pglite-pgvector": "0.0.5"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0"
+  }
+}
