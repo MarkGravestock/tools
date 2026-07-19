@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node src/build.mjs",
-    "test": "node test/test.mjs",
+    "test": "node test/test.mjs && node test/bridge.test.mjs",
     "smoke": "node test/smoke.mjs && node test/smokevec.mjs"
   },
   "dependencies": {
@@ -12,6 +12,8 @@
     "@electric-sql/pglite-pgvector": "0.0.5"
   },
   "devDependencies": {
-    "jsdom": "^25.0.0"
+    "@electric-sql/pglite-socket": "^0.2.7",
+    "jsdom": "^25.0.0",
+    "pg": "^8.22.0"
   }
 }

@@ -19,7 +19,7 @@ site root.
 
 | Tool | What it does |
 |---|---|
-| [Postgres Query Explainer](postgres-query-explainer/) | Runs `EXPLAIN (ANALYZE, BUFFERS)` in-browser (real Postgres via WASM) and renders the plan as an annotated, colour-coded tree. |
+| [Postgres Query Explainer](postgres-query-explainer/) | Runs `EXPLAIN (ANALYZE, BUFFERS)` in-browser (real Postgres via WASM) — or against your own servers through a local bridge — and renders the plan as an annotated, colour-coded tree. |
 
 ## Adding a tool
 

@@ -91,6 +91,15 @@
   }
   .hint { font-size: 13px; color: var(--muted); }
 
+  /* Bridge connect panel */
+  .bridgebox { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
+  .bridgebox[hidden] { display: none; }
+  .bridgebox input[type="text"], .bridgebox input[type="password"] {
+    font-family: var(--mono); font-size: 13px; padding: 7px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink);
+  }
+  .bridgebox .hint { flex-basis: 100%; }
+
   #status { font-family: var(--mono); font-size: 13px; color: var(--muted); min-height: 20px; margin-bottom: 10px; white-space: pre-wrap; }
   #status.err { color: var(--amber); }
 
@@ -176,10 +185,19 @@
   <div class="controls">
     <button id="loadExample">Load example database</button>
     <button id="openFile" class="secondary">Open a .sql file</button>
+    <button id="connectServer" class="secondary">Connect to a server</button>
     <input type="file" id="filePicker" accept=".sql,text/plain" hidden>
     <select id="examplePicker" hidden aria-label="Example queries"></select>
   </div>
   <div class="hint" id="filehint" hidden>Plain SQL only (CREATE TABLE + INSERT statements). For an existing database use <code>pg_dump --inserts --no-owner --no-privileges</code> &mdash; the default COPY format isn&rsquo;t supported here.</div>
+  <div class="bridgebox" id="bridgebox" hidden>
+    <input type="text" id="bridgeUrl" size="24" placeholder="http://localhost:7432" aria-label="Bridge URL">
+    <input type="password" id="bridgeToken" size="30" placeholder="bridge token" aria-label="Bridge token">
+    <label class="toggle"><input type="checkbox" id="bridgeRemember"> remember token</label>
+    <button id="bridgeConnect">Connect</button>
+    <select id="bridgeProfile" hidden aria-label="Connection profile"></select>
+    <span class="hint">Runs against a real server through a local bridge you start yourself: <code>cd bridge &amp;&amp; npm install &amp;&amp; node bridge.mjs --conn "postgres://&hellip;"</code> &mdash; it prints the token. Database credentials stay with the bridge; this page only stores its URL and token. Every run happens in a transaction that is always rolled back.</span>
+  </div>
   <div id="status"></div>
 
   <div class="editorbox" id="editorbox" hidden>
@@ -213,10 +231,11 @@
   </section>
 
   <footer>
-    Everything runs locally in this page; nothing leaves your browser. Queries are executed for real (once for results, once under <code>EXPLAIN ANALYZE</code> for read-only statements; writes run once, under <code>EXPLAIN ANALYZE</code>).
+    <span id="localNote">Everything runs locally in this page; nothing leaves your browser. Queries are executed for real (once for results, once under <code>EXPLAIN ANALYZE</code> for read-only statements; writes run once, under <code>EXPLAIN ANALYZE</code>).</span>
+    <span id="serverNote" hidden>Connected to a PostgreSQL server through your local bridge. Every run happens inside a transaction that is always rolled back; sessions are read-only unless the bridge was started with <code>--allow-writes</code>.</span>
     Inspired by <a href="https://tools.simonwillison.net/sqlite-query-explainer">Simon Willison&rsquo;s SQLite Query Explainer</a>.
     Reference: <a href="https://www.postgresql.org/docs/current/using-explain.html">Using EXPLAIN</a> &middot; <a href="https://www.pgmustard.com/docs/explain">pgMustard glossary</a>.
-    Note: this is single-process Postgres &mdash; no parallel workers, and timings differ from a real server.
+    <span id="pgliteNote">Note: this is single-process Postgres &mdash; no parallel workers, and timings differ from a real server.</span>
   </footer>
 </div>
 
@@ -362,11 +381,31 @@ const NODE_DOCS = {
   },
   'Gather': {
     what: 'Collects rows from parallel worker processes.',
-    detail: 'Note: in this in-browser build parallel workers are unavailable, so you will rarely see this node here even where a server would use it.',
+    detail: 'The plan fragment below runs simultaneously in several worker processes plus the leader; Gather merges their output streams in arrival order. (The in-browser PGlite build is single-process, so this node only appears against a real server.)',
   },
   'Gather Merge': {
     what: 'Collects rows from parallel workers, preserving sort order.',
+    detail: 'Like Gather, but each worker’s output is sorted and this node interleaves the streams to keep the overall order — avoiding a full re-sort above.',
+  },
+  'Foreign Scan': {
+    what: 'Reads rows from a foreign table via a foreign data wrapper.',
+    detail: 'The actual work happens in an external system (another Postgres via postgres_fdw, a file, another database). Costs and row counts depend on what the FDW reports, and conditions may or may not be pushed down to the remote side.',
+  },
+  'Sample Scan': {
+    what: 'Reads a random sample of a table (TABLESAMPLE).',
+    detail: 'BERNOULLI samples individual rows (visits every page); SYSTEM samples whole pages (much cheaper, less uniform).',
+  },
+  'Table Function Scan': {
+    what: 'Reads rows produced by a table function such as XMLTABLE.',
     detail: '',
+  },
+  'Named Tuplestore Scan': {
+    what: 'Reads a named row store, such as a trigger’s transition table.',
+    detail: 'Appears in AFTER ... REFERENCING OLD/NEW TABLE trigger functions, reading the set of rows the triggering statement touched.',
+  },
+  'Custom Scan': {
+    what: 'A scan provided by an extension.',
+    detail: 'Extensions (Citus, TimescaleDB, columnar stores, …) can inject their own plan node types; the semantics depend on the extension.',
   },
   'ModifyTable': {
     what: 'Applies INSERT / UPDATE / DELETE / MERGE changes produced by the plan below.',
@@ -380,7 +419,7 @@ const NODE_CATEGORY = {
   'Bitmap Index Scan': 'scan', 'Bitmap Heap Scan': 'scan', 'BitmapOr': 'scan', 'BitmapAnd': 'scan',
   'Tid Scan': 'scan', 'CTE Scan': 'scan', 'Subquery Scan': 'scan', 'Function Scan': 'scan',
   'Values Scan': 'scan', 'WorkTable Scan': 'scan', 'Sample Scan': 'scan', 'Foreign Scan': 'scan',
-  'Named Tuplestore Scan': 'scan', 'Table Function Scan': 'scan',
+  'Named Tuplestore Scan': 'scan', 'Table Function Scan': 'scan', 'Custom Scan': 'scan',
   'Nested Loop': 'join', 'Hash Join': 'join', 'Merge Join': 'join',
   'Aggregate': 'aggregate', 'WindowAgg': 'aggregate', 'Group': 'aggregate', 'SetOp': 'aggregate', 'Unique': 'aggregate',
   'Sort': 'sort', 'Incremental Sort': 'sort',
@@ -461,6 +500,7 @@ function nodeTitle(n) {
   if (t === 'SetOp' && n['Command']) t = n['Command'] + ' (SetOp)';
   if (n['Join Type'] && n['Join Type'] !== 'Inner' && /Join|Nested Loop/.test(t)) t += ' (' + n['Join Type'] + ')';
   if (n['Operation'] && n['Node Type'] === 'ModifyTable') t = n['Operation'];
+  if (n['Parallel Aware']) t = 'Parallel ' + t;
   return t;
 }
 
@@ -518,7 +558,18 @@ function nodeInsights(n, totals) {
       }
     }
     if (loops > 1) {
-      out.push({ level: 'info', text: 'Executed ' + fmtNum(loops) + ' times (once per outer row); row and time figures shown are per execution.' });
+      out.push({ level: 'info', text: 'Executed ' + fmtNum(loops) + ' times (once per outer row, or once per parallel process); row and time figures shown are per execution.' });
+    }
+  }
+
+  // Parallel workers (Gather / Gather Merge — real servers only)
+  if (n['Workers Planned'] !== undefined) {
+    const planned = n['Workers Planned'];
+    const launched = n['Workers Launched'];
+    if (launched !== undefined && launched < planned) {
+      out.push({ level: 'warn', text: 'Only ' + launched + ' of ' + planned + ' planned workers launched — the server’s worker pool (max_parallel_workers) was exhausted, so less parallelism than the plan was costed for.' });
+    } else if (launched !== undefined) {
+      out.push({ level: 'info', text: launched + ' parallel worker' + (launched === 1 ? '' : 's') + ' launched (plus the leader); nodes below ran in all of them, so their figures are per process.' });
     }
   }
 
@@ -673,7 +724,9 @@ function annotatePlan(root, planning) {
 }
 
 // Overall summary sentence(s) for the whole plan.
-function planSummary(annotated) {
+// qp (optional) is the full EXPLAIN JSON object, for server-level extras
+// like JIT and trigger timings that live outside the plan tree.
+function planSummary(annotated, qp) {
   const bits = [];
   const nodes = [];
   (function fl(n) { nodes.push(n); n.children.forEach(fl); })(annotated.tree);
@@ -683,6 +736,15 @@ function planSummary(annotated) {
   }
   const warns = nodes.reduce((s, n) => s + n.insights.filter((i) => i.level === 'warn').length, 0);
   if (warns) bits.push(warns + ' warning' + (warns === 1 ? '' : 's') + ' flagged below (amber).');
+  if (qp && qp['JIT'] && qp['JIT']['Timing'] && qp['JIT']['Timing']['Total'] !== undefined) {
+    const jit = qp['JIT']['Timing']['Total'];
+    bits.push('JIT compiled ' + qp['JIT']['Functions'] + ' functions in ' + fmtMs(jit) +
+      (annotated.totalTime && jit > annotated.totalTime * 0.2 ? ' — a large share of the runtime; for short queries consider jit = off.' : '.'));
+  }
+  if (qp && Array.isArray(qp['Triggers']) && qp['Triggers'].length) {
+    const tt = qp['Triggers'].reduce((s, t) => s + (t['Time'] || 0), 0);
+    bits.push('Triggers fired: ' + qp['Triggers'].map((t) => t['Trigger Name'] + ' (' + fmtNum(t['Calls']) + '×)').join(', ') + ', ' + fmtMs(tt) + ' total.');
+  }
   return bits.join(' ');
 }
 
@@ -1064,8 +1126,12 @@ limit 5;` }
 
 // ---- App state -------------------------------------------------------------
 let db = null;
-let dbSource = null; // 'example' | 'file'
+let dbSource = null; // 'example' | 'file' | 'server'
 let building = false;
+// Where queries execute: the in-page PGlite, or a real server via the local
+// bridge. The bridge holds all database credentials; the page stores only
+// the bridge URL, its session token, and a profile name.
+let backend = { kind: "pglite" };
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
@@ -1079,8 +1145,39 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
+// ---- Bridge backend --------------------------------------------------------
+async function bridgeRun(payload) {
+  let r;
+  try {
+    r = await fetch(backend.url + "/api/run", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + backend.token },
+      body: JSON.stringify({ profile: backend.profile, ...payload }),
+    });
+  } catch (e) {
+    throw new Error("Could not reach the bridge at " + backend.url + " — is it still running?");
+  }
+  const j = await r.json().catch(() => ({ error: "unreadable response from bridge" }));
+  if (!r.ok) throw new Error(j.error + (j.hint ? "\n" + j.hint : ""));
+  return j;
+}
+
+// Run a single read-only SQL statement on whichever backend is active.
+async function q(sql) {
+  if (backend.kind === "bridge") return bridgeRun({ statements: [sql], explain: false });
+  return db.query(sql);
+}
+
+function applyServerMode(on) {
+  $("localNote").hidden = on;
+  $("serverNote").hidden = !on;
+  $("pgliteNote").hidden = on;
+}
+
 // ---- Database lifecycle ----------------------------------------------------
 async function freshDb() {
+  backend = { kind: "pglite" };
+  applyServerMode(false);
   if (db) { try { await db.close(); } catch (e) {} }
   db = new PGlite({ extensions: { vector } });
   const v = await db.query("select version()");
@@ -1153,14 +1250,14 @@ async function loadSqlFile(file) {
 }
 
 async function showSchema() {
-  const cols = await db.query(`
+  const cols = await q(`
     select c.table_name, c.column_name, c.data_type
     from information_schema.columns c
     join information_schema.tables t
       on t.table_schema = c.table_schema and t.table_name = c.table_name
     where c.table_schema = 'public' and t.table_type = 'BASE TABLE'
     order by c.table_name, c.ordinal_position`);
-  const counts = await db.query(`
+  const counts = await q(`
     select relname, coalesce(n_live_tup, 0) as n
     from pg_stat_user_tables`);
   const cntMap = Object.fromEntries(counts.rows.map((r) => [r.relname, r.n]));
@@ -1209,7 +1306,8 @@ function isMutation(stmt) {
 }
 
 async function runQuery() {
-  if (!db || building) return;
+  if (building) return;
+  if (backend.kind === "pglite" && !db) return;
   const script = $("sql").value;
   const stmts = splitStatements(script);
   if (!stmts.length) return;
@@ -1217,33 +1315,49 @@ async function runQuery() {
   setStatus("");
   const t0 = performance.now();
   try {
-    await db.exec("reset all");
     const last = stmts[stmts.length - 1];
-    for (const s of stmts.slice(0, -1)) await db.exec(s);
+    const explainable = isExplainable(last);
+    const mutating = isMutation(last);
+    let res = null, qp = null;
 
-    if (!isExplainable(last)) {
+    if (backend.kind === "bridge") {
+      // One round trip: the bridge runs the whole script in a single
+      // transaction (setup stmts, results, EXPLAIN ANALYZE) and rolls back.
+      const r = await bridgeRun({ statements: stmts, explain: explainable, mutating, rowCap: ROW_CAP + 1 });
+      res = r;
+      qp = r.plan || null;
+    } else {
+      await db.exec("reset all");
+      for (const s of stmts.slice(0, -1)) await db.exec(s);
+      if (!explainable) {
+        await db.exec(last);
+      } else {
+        if (!mutating) res = await db.query(last);
+        const exp = await db.query("explain (analyze, buffers, format json) " + last);
+        qp = exp.rows[0]["QUERY PLAN"][0];
+      }
+    }
+    const wall = performance.now() - t0;
+
+    if (!explainable) {
       // DDL etc: just run it.
-      const r = await db.exec(last);
-      renderResults({ rows: [], fields: [] }, "Statement executed (" + fmtMs(performance.now() - t0) + ").");
+      renderResults({ rows: [], fields: [] },
+        "Statement executed" + (backend.kind === "bridge" ? " and rolled back (server mode never commits)" : "") +
+        " (" + fmtMs(wall) + ").");
       $("planSection").hidden = true;
-      if (dbSource) await showSchema();
+      if (dbSource && dbSource !== "server") await showSchema();
       return;
     }
-
-    let res = null;
-    const mutating = isMutation(last);
-    if (!mutating) res = await db.query(last);
-    const exp = await db.query("explain (analyze, buffers, format json) " + last);
-    const qp = exp.rows[0]["QUERY PLAN"][0];
-    const wall = performance.now() - t0;
 
     renderPlan(qp);
     if (mutating) {
       renderResults({ rows: [], fields: [] },
         "Write statement executed once under EXPLAIN ANALYZE" +
-        (qp["Plan"] && qp["Plan"]["Actual Rows"] !== undefined ? "" : "") + ".");
+        (backend.kind === "bridge" ? " and rolled back" : "") + ".");
     } else {
-      renderResults(res, null);
+      const capNote = backend.kind === "bridge" && res.rowCount > ROW_CAP
+        ? res.rowCount + " rows (showing first " + ROW_CAP + ")" : null;
+      renderResults(res, capNote);
     }
     $("timing").textContent =
       "planning " + fmtMs(qp["Planning Time"]) + " \u00b7 execution " + fmtMs(qp["Execution Time"]) + " \u00b7 total " + fmtMs(wall);
@@ -1257,14 +1371,14 @@ async function runQuery() {
     $("resultSection").hidden = true;
     $("timing").textContent = "";
   } finally {
-    await db.exec("reset all").catch(() => {});
+    if (backend.kind === "pglite" && db) await db.exec("reset all").catch(() => {});
     $("run").disabled = false;
   }
 }
 
 function renderPlan(qp) {
   const ann = annotatePlan(qp["Plan"], qp["Planning Time"]);
-  $("summary").textContent = planSummary(ann) || "Plan executed.";
+  $("summary").textContent = planSummary(ann, qp) || "Plan executed.";
   renderLegend(ann.tree);
   const host = $("plan");
   host.innerHTML = "";
@@ -1338,6 +1452,88 @@ function renderResults(res, note) {
 $("loadExample").addEventListener("click", () => loadExampleDb());
 $("openFile").addEventListener("click", () => { $("filehint").hidden = false; $("filePicker").click(); });
 $("filePicker").addEventListener("change", (e) => { if (e.target.files[0]) loadSqlFile(e.target.files[0]); });
+
+// ---- Bridge connect flow ---------------------------------------------------
+function bridgeProfileLabel(prof) {
+  return (prof && prof.version ? prof.version : "PostgreSQL") + " · " + prof.name;
+}
+
+async function connectBridge() {
+  if (building) return;
+  const url = ($("bridgeUrl").value.trim() || "http://localhost:7432").replace(/\/+$/, "");
+  const token = $("bridgeToken").value.trim();
+  if (!token) { setStatus("Enter the token the bridge printed at startup.", true); return; }
+  $("bridgeConnect").disabled = true;
+  try {
+    setStatus("Connecting to bridge…");
+    let r;
+    try {
+      r = await fetch(url + "/api/info", { headers: { authorization: "Bearer " + token } });
+    } catch (e) {
+      throw new Error("Could not reach " + url + " — is the bridge running? Start it with: node bridge.mjs --conn \"postgres://…\"");
+    }
+    const info = await r.json().catch(() => ({ error: "unreadable response — is that really the bridge URL?" }));
+    if (!r.ok) throw new Error(info.error || "bridge refused the connection");
+    if (!info.profiles || !info.profiles.length) throw new Error("bridge reports no connection profiles");
+
+    const sel = $("bridgeProfile");
+    sel.innerHTML = "";
+    for (const p of info.profiles) {
+      const o = document.createElement("option");
+      o.value = p.name;
+      o.textContent = p.name + (p.version ? " — " + p.version : p.error ? " (unreachable: " + p.error + ")" : "");
+      sel.appendChild(o);
+    }
+    sel.hidden = info.profiles.length <= 1;
+    const savedProfile = localStorage.getItem("pqe-bridge-profile");
+    if (savedProfile && info.profiles.some((p) => p.name === savedProfile)) sel.value = savedProfile;
+
+    backend = { kind: "bridge", url, token, profile: sel.value, allowWrites: info.allowWrites, info };
+    dbSource = "server";
+    applyServerMode(true);
+    localStorage.setItem("pqe-bridge-url", url);
+    if ($("bridgeRemember").checked) localStorage.setItem("pqe-bridge-token", token);
+    else localStorage.removeItem("pqe-bridge-token");
+    localStorage.setItem("pqe-bridge-profile", sel.value);
+
+    history.replaceState(null, "", location.pathname);
+    $("examplePicker").hidden = true;
+    const prof = info.profiles.find((p) => p.name === sel.value);
+    $("pgver").textContent = bridgeProfileLabel(prof);
+    await showSchema();
+    $("editorbox").hidden = false;
+    if (!$("sql").value.trim()) {
+      $("sql").value = "select table_name, table_type from information_schema.tables\nwhere table_schema = 'public' order by 1;";
+    }
+    setStatus("Connected to " + sel.value + (info.allowWrites ? " (writes allowed, still rolled back)" : " (read-only)") +
+      " — every run happens in a transaction the bridge rolls back.");
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    $("bridgeConnect").disabled = false;
+  }
+}
+
+$("connectServer").addEventListener("click", () => { $("bridgebox").hidden = !$("bridgebox").hidden; });
+$("bridgeConnect").addEventListener("click", connectBridge);
+$("bridgeToken").addEventListener("keydown", (e) => { if (e.key === "Enter") connectBridge(); });
+$("bridgeProfile").addEventListener("change", async () => {
+  if (backend.kind !== "bridge") return;
+  backend.profile = $("bridgeProfile").value;
+  localStorage.setItem("pqe-bridge-profile", backend.profile);
+  const prof = backend.info.profiles.find((p) => p.name === backend.profile);
+  $("pgver").textContent = bridgeProfileLabel(prof);
+  try { await showSchema(); setStatus("Switched to " + backend.profile + "."); }
+  catch (e) { setStatus(e.message, true); }
+});
+
+// Prefill from the last session (bridge URL + profile always; token only if
+// "remember" was ticked — it is the only secret this page ever stores).
+$("bridgeUrl").value = localStorage.getItem("pqe-bridge-url") || "http://localhost:7432";
+{
+  const t = localStorage.getItem("pqe-bridge-token");
+  if (t) { $("bridgeToken").value = t; $("bridgeRemember").checked = true; }
+}
 $("run").addEventListener("click", runQuery);
 $("sql").addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runQuery(); }

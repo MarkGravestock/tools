@@ -136,11 +136,31 @@ const NODE_DOCS = {
   },
   'Gather': {
     what: 'Collects rows from parallel worker processes.',
-    detail: 'Note: in this in-browser build parallel workers are unavailable, so you will rarely see this node here even where a server would use it.',
+    detail: 'The plan fragment below runs simultaneously in several worker processes plus the leader; Gather merges their output streams in arrival order. (The in-browser PGlite build is single-process, so this node only appears against a real server.)',
   },
   'Gather Merge': {
     what: 'Collects rows from parallel workers, preserving sort order.',
+    detail: 'Like Gather, but each worker’s output is sorted and this node interleaves the streams to keep the overall order — avoiding a full re-sort above.',
+  },
+  'Foreign Scan': {
+    what: 'Reads rows from a foreign table via a foreign data wrapper.',
+    detail: 'The actual work happens in an external system (another Postgres via postgres_fdw, a file, another database). Costs and row counts depend on what the FDW reports, and conditions may or may not be pushed down to the remote side.',
+  },
+  'Sample Scan': {
+    what: 'Reads a random sample of a table (TABLESAMPLE).',
+    detail: 'BERNOULLI samples individual rows (visits every page); SYSTEM samples whole pages (much cheaper, less uniform).',
+  },
+  'Table Function Scan': {
+    what: 'Reads rows produced by a table function such as XMLTABLE.',
     detail: '',
+  },
+  'Named Tuplestore Scan': {
+    what: 'Reads a named row store, such as a trigger’s transition table.',
+    detail: 'Appears in AFTER ... REFERENCING OLD/NEW TABLE trigger functions, reading the set of rows the triggering statement touched.',
+  },
+  'Custom Scan': {
+    what: 'A scan provided by an extension.',
+    detail: 'Extensions (Citus, TimescaleDB, columnar stores, …) can inject their own plan node types; the semantics depend on the extension.',
   },
   'ModifyTable': {
     what: 'Applies INSERT / UPDATE / DELETE / MERGE changes produced by the plan below.',
@@ -154,7 +174,7 @@ const NODE_CATEGORY = {
   'Bitmap Index Scan': 'scan', 'Bitmap Heap Scan': 'scan', 'BitmapOr': 'scan', 'BitmapAnd': 'scan',
   'Tid Scan': 'scan', 'CTE Scan': 'scan', 'Subquery Scan': 'scan', 'Function Scan': 'scan',
   'Values Scan': 'scan', 'WorkTable Scan': 'scan', 'Sample Scan': 'scan', 'Foreign Scan': 'scan',
-  'Named Tuplestore Scan': 'scan', 'Table Function Scan': 'scan',
+  'Named Tuplestore Scan': 'scan', 'Table Function Scan': 'scan', 'Custom Scan': 'scan',
   'Nested Loop': 'join', 'Hash Join': 'join', 'Merge Join': 'join',
   'Aggregate': 'aggregate', 'WindowAgg': 'aggregate', 'Group': 'aggregate', 'SetOp': 'aggregate', 'Unique': 'aggregate',
   'Sort': 'sort', 'Incremental Sort': 'sort',
@@ -235,6 +255,7 @@ function nodeTitle(n) {
   if (t === 'SetOp' && n['Command']) t = n['Command'] + ' (SetOp)';
   if (n['Join Type'] && n['Join Type'] !== 'Inner' && /Join|Nested Loop/.test(t)) t += ' (' + n['Join Type'] + ')';
   if (n['Operation'] && n['Node Type'] === 'ModifyTable') t = n['Operation'];
+  if (n['Parallel Aware']) t = 'Parallel ' + t;
   return t;
 }
 
@@ -292,7 +313,18 @@ function nodeInsights(n, totals) {
       }
     }
     if (loops > 1) {
-      out.push({ level: 'info', text: 'Executed ' + fmtNum(loops) + ' times (once per outer row); row and time figures shown are per execution.' });
+      out.push({ level: 'info', text: 'Executed ' + fmtNum(loops) + ' times (once per outer row, or once per parallel process); row and time figures shown are per execution.' });
+    }
+  }
+
+  // Parallel workers (Gather / Gather Merge — real servers only)
+  if (n['Workers Planned'] !== undefined) {
+    const planned = n['Workers Planned'];
+    const launched = n['Workers Launched'];
+    if (launched !== undefined && launched < planned) {
+      out.push({ level: 'warn', text: 'Only ' + launched + ' of ' + planned + ' planned workers launched — the server’s worker pool (max_parallel_workers) was exhausted, so less parallelism than the plan was costed for.' });
+    } else if (launched !== undefined) {
+      out.push({ level: 'info', text: launched + ' parallel worker' + (launched === 1 ? '' : 's') + ' launched (plus the leader); nodes below ran in all of them, so their figures are per process.' });
     }
   }
 
@@ -447,7 +479,9 @@ function annotatePlan(root, planning) {
 }
 
 // Overall summary sentence(s) for the whole plan.
-function planSummary(annotated) {
+// qp (optional) is the full EXPLAIN JSON object, for server-level extras
+// like JIT and trigger timings that live outside the plan tree.
+function planSummary(annotated, qp) {
   const bits = [];
   const nodes = [];
   (function fl(n) { nodes.push(n); n.children.forEach(fl); })(annotated.tree);
@@ -457,6 +491,15 @@ function planSummary(annotated) {
   }
   const warns = nodes.reduce((s, n) => s + n.insights.filter((i) => i.level === 'warn').length, 0);
   if (warns) bits.push(warns + ' warning' + (warns === 1 ? '' : 's') + ' flagged below (amber).');
+  if (qp && qp['JIT'] && qp['JIT']['Timing'] && qp['JIT']['Timing']['Total'] !== undefined) {
+    const jit = qp['JIT']['Timing']['Total'];
+    bits.push('JIT compiled ' + qp['JIT']['Functions'] + ' functions in ' + fmtMs(jit) +
+      (annotated.totalTime && jit > annotated.totalTime * 0.2 ? ' — a large share of the runtime; for short queries consider jit = off.' : '.'));
+  }
+  if (qp && Array.isArray(qp['Triggers']) && qp['Triggers'].length) {
+    const tt = qp['Triggers'].reduce((s, t) => s + (t['Time'] || 0), 0);
+    bits.push('Triggers fired: ' + qp['Triggers'].map((t) => t['Trigger Name'] + ' (' + fmtNum(t['Calls']) + '×)').join(', ') + ', ' + fmtMs(tt) + ' total.');
+  }
   return bits.join(' ');
 }
 

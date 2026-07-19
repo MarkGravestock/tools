@@ -26,19 +26,59 @@ no data leaves the page.
 - **Open a .sql file** loads your own schema/data. Plain SQL statements
   only — export with `pg_dump --inserts --no-owner --no-privileges`
   (the default `COPY` format is detected and rejected with a hint).
+- **Connect to a server** runs your queries against a real PostgreSQL
+  instance through a small localhost bridge (see below) — real plans,
+  parallel workers, JIT, your production statistics.
 - Multiple statements are allowed in the editor; the last one is explained,
   and settings are reset between runs — so planner toggles like
   `set enable_hashjoin = off;` work per-query.
 - Example-database queries are bookmarkable via `#sql=` URLs.
+
+## Connecting to a real server
+
+Browsers can't speak the Postgres wire protocol, so live analysis goes
+through a tiny HTTP bridge you run on your own machine:
+
+```
+cd bridge
+npm install
+node bridge.mjs --conn "postgres://user:pass@host:5432/db" --name prod
+```
+
+It prints a URL and a session token; paste both into **Connect to a server**
+on the page. Multiple `--conn ... --name ...` pairs give you a profile picker.
+
+Security model:
+
+- **Credentials never reach the browser.** Connection strings live with the
+  bridge process; the page stores only the bridge URL, its token (only if
+  "remember token" is ticked), and a profile name.
+- **Nothing is ever committed.** Every run — including `EXPLAIN ANALYZE`,
+  which really executes the query — happens inside a transaction the bridge
+  rolls back.
+- **Read-only by default.** Writes fail unless the bridge is started with
+  `--allow-writes` (still rolled back; useful for analyzing UPDATE/DELETE
+  plans). `--timeout <ms>` caps statement time (default 30s).
+- The bridge listens on `127.0.0.1` only and requires its bearer token on
+  every request.
+
+Note: `EXPLAIN ANALYZE` executes the query for real on your server — even
+rolled back, a heavy query costs real I/O and CPU, and rolled-back writes
+still create dead tuples and take locks. Point it at production thoughtfully.
 
 ## Development
 
 ```
 npm install
 npm run build   # inline src/ modules into postgres-query-explainer.html
-npm test        # run every example query against PGlite; fail on unknown plan nodes
+npm test        # example queries against PGlite + bridge end-to-end test
 npm run smoke   # headless end-to-end test of the built file (jsdom + real PGlite)
 ```
+
+The bridge test needs no real server: it exposes PGlite over the actual
+Postgres wire protocol (`@electric-sql/pglite-socket`) and runs the real
+bridge against it, asserting auth, plans, read-only enforcement, and that
+every run is rolled back.
 
 | Path | Purpose |
 |---|---|
@@ -47,7 +87,8 @@ npm run smoke   # headless end-to-end test of the built file (jsdom + real PGlit
 | `src/planlogic.js` | Pure plan parsing/annotation logic (no DOM) |
 | `src/exampledb.js` | Example schema + example queries |
 | `src/build.mjs` | Inlines the modules into the template |
-| `test/` | Example validation and headless smoke tests |
+| `bridge/` | Localhost HTTP bridge for connecting to real servers |
+| `test/` | Example validation, bridge end-to-end, and smoke tests |
 
 To add an example query, append to `EXAMPLES` in `src/exampledb.js`, then
 `npm test && npm run build`. To annotate a new plan node type, add it to
