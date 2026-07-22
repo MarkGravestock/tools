@@ -8,19 +8,28 @@ CheerpJ's library mode.
 
 ## How to run it
 
-**It must be served over HTTP** — opening `index.html` directly (`file://`)
-gives a null origin and Chrome blocks every fetch CheerpJ needs, so nothing
-loads. Serve the **repo root** (the page loads
-`calcite-spike/app/calcite-spike.jar` relative to the site root, same as
-GitHub Pages will):
+**It must be served over HTTP, by a server that supports Range requests.**
+Two gotchas, both fatal if you skip them:
+
+- Opening `index.html` directly (`file://`) gives a null origin and Chrome
+  blocks every fetch CheerpJ needs.
+- `python -m http.server` *does* serve over HTTP but **ignores the `Range`
+  header**, and CheerpJ streams the jar with byte-range requests — so it
+  fails with *"HTTP server does not support the 'Range' header."*
+
+Use the included Range-capable server instead:
 
 ```sh
-python3 -m http.server 8000   # from the repo root (use `python` on Windows)
+cd calcite-spike
+python serve.py        # http://localhost:8000/  (use python3 if that's your binary)
 ```
 
-Open <http://localhost:8000/calcite-spike/>. The page needs internet access
-for the CheerpJ runtime (`cjrtnc.leaningtech.com`). It self-tests and shows a
-green/red verdict:
+Open <http://localhost:8000/>. The page needs internet access for the CheerpJ
+runtime (`cjrtnc.leaningtech.com`). It self-tests and shows a green/red
+verdict:
+
+> GitHub Pages supports Range requests natively, so the deployed site needs
+> no special server — `serve.py` is only for local runs.
 
 1. initialise CheerpJ,
 2. load the Calcite fat jar,
