@@ -47,6 +47,7 @@ function makeEngine() {
     json: (name, text) => send(`json ${name} ${b64(text)}`).then(JSON.parse),
     run: (sql) => send(`run ${b64(sql)}`).then(JSON.parse),
     explain: (sql) => send(`explain ${b64(sql)}`).then(JSON.parse),
+    rules: (sql) => send(`rules ${b64(sql)}`).then(JSON.parse),
     close: () => proc.stdin.write("quit\n"),
   };
 }
@@ -79,7 +80,15 @@ async function main() {
     for (const op of [...unknownOperators(plan.logical), ...unknownOperators(plan.physical)]) {
       undocumented.add(op);
     }
-    console.log(`  ok  ${ex.group} / ${ex.title} (${result.rows.length} rows)`);
+
+    const rules = await engine.rules(ex.sql);
+    assert.ok(!rules.error, `rules "${ex.title}": ${rules.error}`);
+    assert.ok(Array.isArray(rules.rules) && rules.rules.length > 0,
+      `"${ex.title}" fired at least one optimizer rule`);
+    assert.ok(rules.rules.every((r) => typeof r.rule === "string" && r.count > 0),
+      `"${ex.title}" rule entries are well-formed`);
+
+    console.log(`  ok  ${ex.group} / ${ex.title} (${result.rows.length} rows, ${rules.rules.length} rules)`);
     passed++;
   }
 

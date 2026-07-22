@@ -7,8 +7,12 @@ import java.sql.Statement;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.function.Consumer;
 
 import org.apache.calcite.jdbc.CalciteConnection;
+import org.apache.calcite.plan.RelOptListener;
+import org.apache.calcite.plan.RelOptPlanner;
+import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.schema.SchemaPlus;
 
 /**
@@ -110,6 +114,54 @@ public final class QueryRunner {
     } catch (Throwable t) {
       return Json.error(t);
     }
+  }
+
+  /**
+   * Returns the planner rules that fired while optimizing the query, as
+   * {@code {"rules":[{"rule":"…","count":n}, …]}} in the order first seen.
+   *
+   * <p>Rather than rebuild a planner, this hooks the very one the JDBC path
+   * uses ({@link Hook#PLANNER}) and attaches a listener, then triggers planning
+   * with {@code EXPLAIN} — so the rule list matches the physical plan exactly.
+   */
+  public static String rules(String sql) {
+    final Map<String, int[]> counts = new LinkedHashMap<>();
+    RelOptListener listener = new RuleCounter(counts);
+    Consumer<RelOptPlanner> attach = (planner) -> planner.addListener(listener);
+    try (Hook.Closeable ignored = Hook.PLANNER.addThread(attach)) {
+      try (Connection conn = connect();
+           Statement stmt = conn.createStatement()) {
+        stmt.executeQuery("explain plan for " + sql).close();
+      }
+    } catch (Throwable t) {
+      return Json.error(t);
+    }
+    StringBuilder sb = new StringBuilder("{\"rules\":[");
+    boolean first = true;
+    for (Map.Entry<String, int[]> e : counts.entrySet()) {
+      if (!first) sb.append(',');
+      first = false;
+      sb.append("{\"rule\":").append(Json.str(e.getKey()))
+        .append(",\"count\":").append(e.getValue()[0]).append('}');
+    }
+    return sb.append("]}").toString();
+  }
+
+  /** Tallies successful rule firings; other planner events are ignored. */
+  private static final class RuleCounter implements RelOptListener {
+    private final Map<String, int[]> counts;
+    RuleCounter(Map<String, int[]> counts) { this.counts = counts; }
+
+    @Override public void ruleProductionSucceeded(RuleProductionEvent event) {
+      if (event.isBefore()) return; // fires twice per production; count once
+      String name = event.getRuleCall().getRule().toString();
+      counts.computeIfAbsent(name, k -> new int[1])[0]++;
+    }
+
+    @Override public void ruleAttempted(RuleAttemptedEvent event) {}
+    @Override public void relEquivalenceFound(RelEquivalenceEvent event) {}
+    @Override public void relChosen(RelChosenEvent event) {}
+    @Override public void relDiscarded(RelDiscardedEvent event) {}
   }
 
   private static String explainText(Connection conn, String explainSql) throws Exception {

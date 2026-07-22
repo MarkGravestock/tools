@@ -39,6 +39,26 @@ After a spike proved it out end to end (including in a real browser):
   of the Postgres tool running all its examples against live PGlite), and a
   DOM-shim smoke test that drives the built page with CheerpJ stubbed.
 
+## Follow-up: rules fired, and Parquet
+
+Added after the first version merged, in response to "do it" on the two
+suggested extensions.
+
+- **Real fired rules, not a heuristic.** The obvious way to name the optimizer
+  rules would be to guess them from the operator diff. Instead, `rules(sql)`
+  attaches a `RelOptListener` to the actual planner through Calcite's
+  `Hook.PLANNER` and triggers planning, so the list is exactly what fired —
+  `EnumerableMergeJoinRule`, `SortRemoveRule`, `AggregateReduceFunctionsRule`,
+  and so on, with counts. Reuses the proven JDBC path rather than a hand-built
+  Frameworks rule set, which would have been version-fragile.
+- **Parquet decoded in JS, not Java.** The Java Parquet reader drags in
+  parquet-mr and Hadoop, which is exactly what the browser doesn't want.
+  hyparquet decodes Parquet (including snappy) to plain row objects in the page,
+  which are handed to the engine as JSON — so the Java side never learns a third
+  format. hyparquet is imported lazily from a CDN only when a `.parquet` file is
+  added; consistent with the CheerpJ runtime already streaming from a CDN, and
+  it keeps the base page small. The file's bytes stay in the page.
+
 ## Bugs met along the way
 
 - **`file://` and the `Range` header.** CheerpJ needs an HTTP server that
@@ -52,9 +72,15 @@ After a spike proved it out end to end (including in a real browser):
   inside the parent node's text, which a one-operator-per-line parser reads as
   bogus sibling operators. Fixed by folding lines into the current node's detail
   until brackets balance, with a regression test.
+- **`Buffer.buffer` isn't the file.** Decoding the sample Parquet in Node failed
+  with `footer != PAR1` because a Node `Buffer` is a view into a shared pool, so
+  `.buffer` hands back far more than the file's bytes. Sliced with
+  `byteOffset`/`byteLength`. The browser's `File.arrayBuffer()` is exact, so this
+  was only a test-harness trap, but a confusing one.
 
 ## Versions at build time
 
-Apache Calcite 1.41.0 (Java 8 bytecode) · CheerpJ 4.3 runtime · built with
-Gradle + the Shadow plugin on JDK 21 targeting `--release 8` · fonts: Space
-Grotesk + IBM Plex Mono via Google Fonts.
+Apache Calcite 1.41.0 (Java 8 bytecode) · CheerpJ 4.3 runtime · hyparquet 1.26.2
++ hyparquet-compressors 1.1.1 (Parquet decode, via esm.sh) · built with Gradle +
+the Shadow plugin on JDK 21 targeting `--release 8` · fonts: Space Grotesk + IBM
+Plex Mono via Google Fonts.

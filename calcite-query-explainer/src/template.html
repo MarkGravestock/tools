@@ -150,6 +150,14 @@
   details.raw summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
   details.raw pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; }
 
+  /* Optimizer rules */
+  .ruleswrap { margin-bottom: 16px; }
+  .ruleswrap h3 { margin: 0 0 8px; font-size: 15px; font-weight: 700; color: var(--ink); }
+  .ruleswrap h3 span { font-weight: 400; font-size: 13px; color: var(--muted); }
+  .rules { display: flex; flex-wrap: wrap; gap: 6px; }
+  .rulechip { font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; }
+  .rulechip b { color: var(--pg-text); font-weight: 500; }
+
   /* Datasets / schema */
   .schema { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
   .schematbl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; }
@@ -169,13 +177,13 @@
     <span class="ver" id="ver">loading Calcite&hellip;</span>
     <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
   </header>
-  <p class="tagline">Run SQL against CSV and JSON files entirely in your browser, and watch <a href="https://calcite.apache.org/">Apache Calcite</a>&rsquo;s optimizer rewrite the query &mdash; the <b>logical</b> relational algebra it starts from, and the <b>physical</b> plan it actually runs. Real Calcite on the <a href="https://cheerpj.com/">CheerpJ</a> WebAssembly JVM; nothing leaves the page.</p>
+  <p class="tagline">Run SQL against CSV, JSON and Parquet files entirely in your browser, and watch <a href="https://calcite.apache.org/">Apache Calcite</a>&rsquo;s optimizer rewrite the query &mdash; the <b>logical</b> relational algebra it starts from, the <b>physical</b> plan it actually runs, and the rewrite rules it fired to get there. Real Calcite on the <a href="https://cheerpj.com/">CheerpJ</a> WebAssembly JVM; your data never leaves the page.</p>
 
   <div class="controls">
     <button id="runBtn" disabled>Run &amp; explain</button>
     <select id="examplePicker" aria-label="Example queries"></select>
-    <button id="addFile" class="secondary">Add CSV / JSON file</button>
-    <input type="file" id="filePicker" accept=".csv,.json,text/csv,application/json,text/plain" hidden multiple>
+    <button id="addFile" class="secondary">Add CSV / JSON / Parquet file</button>
+    <input type="file" id="filePicker" accept=".csv,.json,.parquet,text/csv,application/json,text/plain" hidden multiple>
   </div>
   <p class="exnote" id="exnote"></p>
 
@@ -200,6 +208,10 @@
     <h2>Query plan</h2>
     <div class="legend" id="legend"></div>
     <div class="diff" id="diff" hidden></div>
+    <div class="ruleswrap" id="rulesPanel" hidden>
+      <h3>Rewrite rules fired <span id="rulesCount"></span></h3>
+      <div class="rules" id="rulesList"></div>
+    </div>
     <div class="plans">
       <div class="plancol">
         <h3>Logical plan</h3>
@@ -294,6 +306,29 @@ function renderDiff(logical, physical) {
   diffEl.hidden = false;
 }
 
+// Calcite rule descriptions carry a "(in:NONE,out:ENUMERABLE)" trait suffix;
+// trim it for display but keep the rule's name.
+function cleanRuleName(name) {
+  return name.replace(/\(in:[^)]*\)\s*$/, "").trim();
+}
+
+function renderRules(ruleResult) {
+  const panel = $("rulesPanel");
+  if (!ruleResult || ruleResult.error || !Array.isArray(ruleResult.rules) || !ruleResult.rules.length) {
+    panel.hidden = true;
+    return;
+  }
+  const total = ruleResult.rules.reduce((n, r) => n + r.count, 0);
+  $("rulesCount").textContent = `— ${ruleResult.rules.length} distinct, ${total} firings`;
+  $("rulesList").innerHTML = ruleResult.rules
+    .slice()
+    .sort((a, b) => b.count - a.count)
+    .map((r) => "<span class='rulechip'>" + esc(cleanRuleName(r.rule)) +
+      (r.count > 1 ? " <b>×" + r.count + "</b>" : "") + "</span>")
+    .join("");
+  panel.hidden = false;
+}
+
 function renderLegend() {
   const seen = new Map();
   for (const key of Object.keys(CATEGORIES)) seen.set(key, CATEGORIES[key]);
@@ -342,15 +377,39 @@ function renderSchema() {
 // ---- Engine bridge --------------------------------------------------------
 let QueryRunner = null;
 
-async function registerTable(name, format, text) {
-  const raw = format === "json"
+// engineFormat is how the engine parses it ("csv" or "json"); label is what the
+// schema panel shows (so Parquet, decoded to JSON rows, still reads "parquet").
+async function registerTable(name, engineFormat, text, label) {
+  const raw = engineFormat === "json"
     ? await QueryRunner.registerJson(name, text)
     : await QueryRunner.registerCsv(name, text);
   const res = JSON.parse(raw);
   if (res.error) throw new Error(res.error);
-  registered.set(res.table, { format, columns: res.columns, rowCount: res.rowCount });
+  registered.set(res.table, { format: label || engineFormat, columns: res.columns, rowCount: res.rowCount });
   renderSchema();
   return res;
+}
+
+// Parquet is decoded to plain row objects in the browser (hyparquet, lazily
+// imported from a CDN only when needed), then handed to the engine as JSON —
+// so the Java side stays format-agnostic. The file's bytes never leave the page.
+let parquetLib = null;
+async function loadParquet() {
+  if (!parquetLib) {
+    const [hp, hc] = await Promise.all([
+      import("https://esm.sh/hyparquet@1.26.2"),
+      import("https://esm.sh/hyparquet-compressors@1.1.1"),
+    ]);
+    parquetLib = { read: hp.parquetReadObjects, compressors: hc.compressors };
+  }
+  return parquetLib;
+}
+
+async function parquetToRows(file) {
+  const { read, compressors } = await loadParquet();
+  const ab = await file.arrayBuffer();
+  const src = { byteLength: ab.byteLength, slice: (s, e) => ab.slice(s, e ?? ab.byteLength) };
+  return read({ file: src, compressors });
 }
 
 async function runQuery() {
@@ -362,6 +421,7 @@ async function runQuery() {
     const t0 = performance.now();
     const result = JSON.parse(await QueryRunner.run(sql));
     const plan = JSON.parse(await QueryRunner.explain(sql));
+    const rules = JSON.parse(await QueryRunner.rules(sql));
     const ms = Math.round(performance.now() - t0);
 
     renderResults(result);
@@ -370,6 +430,7 @@ async function runQuery() {
       $("planSection").hidden = true;
     } else {
       renderDiff(plan.logical, plan.physical);
+      renderRules(rules);
       renderTree($("logicalTree"), plan.logical);
       renderTree($("physicalTree"), plan.physical);
       $("rawPlan").textContent =
@@ -430,12 +491,20 @@ function applyExample(i) {
 
 async function handleFiles(files) {
   for (const file of files) {
+    const base = file.name.replace(/\.[^.]+$/, "");
     try {
-      const text = await file.text();
-      const format = /\.json$/i.test(file.name) || text.trim().startsWith("[") ? "json" : "csv";
-      const base = file.name.replace(/\.[^.]+$/, "");
-      await registerTable(base, format, text);
-      setStatus(`Registered ${base} from ${file.name}.`, "");
+      if (/\.parquet$/i.test(file.name)) {
+        setStatus(`Decoding ${file.name}…`, "busy");
+        const rows = await parquetToRows(file);
+        if (!rows.length) throw new Error("the Parquet file has no rows");
+        await registerTable(base, "json", JSON.stringify(rows), "parquet");
+        setStatus(`Registered ${base} from ${file.name} (${rows.length} rows).`, "");
+      } else {
+        const text = await file.text();
+        const format = /\.json$/i.test(file.name) || text.trim().startsWith("[") ? "json" : "csv";
+        await registerTable(base, format, text);
+        setStatus(`Registered ${base} from ${file.name}.`, "");
+      }
     } catch (e) {
       setStatus(`Could not load ${file.name}: ${describeError(e)}`, "err");
     }

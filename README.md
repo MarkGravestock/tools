@@ -20,6 +20,7 @@ site root.
 | Tool | What it does |
 |---|---|
 | [Postgres Query Explainer](postgres-query-explainer/) | Runs `EXPLAIN (ANALYZE, BUFFERS)` in-browser (real Postgres via WASM) — or against your own servers through a local bridge — and renders the plan as an annotated, colour-coded tree. |
+| [Calcite Query Explainer](calcite-query-explainer/) | Runs SQL against CSV, JSON and Parquet files in-browser (real Apache Calcite via WASM/CheerpJ) and shows the optimizer's work: the logical algebra and the physical plan side by side, the rewrite rules it fired, and joins across formats. |
 
 ## Adding a tool
 

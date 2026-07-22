@@ -50,6 +50,12 @@ public final class SmokeTest {
     ok &= must(r3, "LogicalJoin");         // logical stage present
     ok &= must(r3, "EnumerableAggregate"); // physical stage present
 
+    System.out.println("== rules fired ==");
+    String r5 = QueryRunner.rules(JOIN_SQL);
+    System.out.println(r5);
+    ok &= must(r5, "\"rules\":[{");    // at least one rule fired
+    ok &= must(r5, "\"count\":");
+
     System.out.println("== error is reported, not thrown ==");
     String r4 = QueryRunner.run("select * from nope");
     System.out.println(r4);

@@ -33,6 +33,13 @@ const EXPLAIN = JSON.stringify({
     "      EnumerableTableScan(table=[[EMPLOYEES]])\n" +
     "      EnumerableTableScan(table=[[DEPARTMENTS]])\n",
 });
+const RULES = JSON.stringify({
+  rules: [
+    { rule: "EnumerableMergeJoinRule(in:NONE,out:ENUMERABLE)", count: 2 },
+    { rule: "AggregateReduceFunctionsRule", count: 6 },
+    { rule: "SortRemoveRule", count: 4 },
+  ],
+});
 const SCHEMA = (name, rows) => JSON.stringify({
   table: name.toUpperCase(), rowCount: rows,
   columns: [{ name: "A", type: "BIGINT" }, { name: "B", type: "VARCHAR" }],
@@ -87,6 +94,7 @@ function installDom() {
     registerJson: async (name) => SCHEMA(name, 3),
     run: async () => RUN,
     explain: async () => EXPLAIN,
+    rules: async () => RULES,
   };
   global.cheerpjInit = async () => {};
   global.cheerpjRunLibrary = async () => ({ cqe: { QueryRunner } });
@@ -125,6 +133,9 @@ async function main() {
   assert.ok(el("physicalTree").children.length > 0, "physical tree built nodes");
   assert.equal(el("diff").hidden, false, "optimizer diff shown");
   assert.ok(el("diff")._html.includes("MergeJoin"), "diff names the introduced MergeJoin");
+  assert.equal(el("rulesPanel").hidden, false, "rules panel shown");
+  assert.ok(el("rulesList")._html.includes("EnumerableMergeJoinRule"), "rules list names a fired rule");
+  assert.ok(!el("rulesList")._html.includes("in:NONE"), "rule trait suffix trimmed for display");
   assert.ok(el("rawPlan")._text.includes("EnumerableMergeJoin"), "raw plan text populated");
   assert.ok(/ran in/.test(el("status")._text), "status reports timing");
 
