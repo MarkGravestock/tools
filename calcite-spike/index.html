@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calcite-in-browser spike</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 60rem;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; }
+  .muted { opacity: .7; font-size: .9rem; }
+  #checks { list-style: none; padding: 0; }
+  #checks li {
+    padding: .4rem .6rem;
+    border-left: 4px solid #999;
+    margin: .3rem 0;
+    background: rgba(128,128,128,.08);
+    font-family: ui-monospace, monospace;
+    font-size: .9rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #checks li.pass { border-color: #2e9e44; }
+  #checks li.fail { border-color: #d0342c; }
+  #verdict { font-weight: 600; padding: .6rem; border-radius: 6px; display: none; }
+  #verdict.pass { display: block; background: rgba(46,158,68,.15); }
+  #verdict.fail { display: block; background: rgba(208,52,44,.15); }
+  textarea {
+    width: 100%;
+    min-height: 5rem;
+    font-family: ui-monospace, monospace;
+    font-size: .9rem;
+    box-sizing: border-box;
+  }
+  button { font: inherit; padding: .3rem .9rem; margin-right: .5rem; }
+  table { border-collapse: collapse; margin-top: .8rem; }
+  th, td { border: 1px solid rgba(128,128,128,.4); padding: .25rem .6rem; font-size: .9rem; }
+  pre { background: rgba(128,128,128,.08); padding: .6rem; overflow-x: auto; font-size: .85rem; }
+</style>
+</head>
+<body>
+<h1>Apache Calcite in the browser — feasibility spike</h1>
+<p class="muted">
+  Real <a href="https://calcite.apache.org/">Apache Calcite</a> 1.41 (unmodified jars,
+  including Janino runtime code generation) running on the
+  <a href="https://cheerpj.com/">CheerpJ</a> WebAssembly JVM. First load fetches the
+  CheerpJ runtime from its CDN plus a ~28&nbsp;MB jar; both are cached by the browser.
+</p>
+
+<div id="verdict"></div>
+<ul id="checks"></ul>
+
+<h2 style="font-size:1.1rem">Try your own SQL</h2>
+<p class="muted">
+  Tables <code>EMP(emp_id, name, dept_id, salary)</code> and
+  <code>DEPT(dept_id, dept_name)</code> are pre-registered from sample CSV.
+  Unquoted identifiers are uppercased, standard Calcite lexing.
+</p>
+<textarea id="sql" spellcheck="false">select d.dept_name, count(*) as headcount, avg(e.salary) as avg_salary
+from emp e join dept d on e.dept_id = d.dept_id
+group by d.dept_name order by avg_salary desc</textarea>
+<p>
+  <button id="run" disabled>Run</button>
+  <button id="explain" disabled>Explain plan</button>
+</p>
+<div id="out"></div>
+
+<script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
+<script type="module">
+const EMP_CSV = `emp_id,name,dept_id,salary
+1,Alice,10,95000
+2,Bob,20,72000
+3,Carol,10,105000
+4,Dave,30,64000
+5,Eve,20,88000`;
+
+const DEPT_CSV = `dept_id,dept_name
+10,Engineering
+20,Sales
+30,Support`;
+
+const JOIN_SQL = `select d.dept_name, count(*) as headcount, avg(e.salary) as avg_salary
+from emp e join dept d on e.dept_id = d.dept_id
+group by d.dept_name order by avg_salary desc`;
+
+const checksEl = document.getElementById("checks");
+const verdictEl = document.getElementById("verdict");
+const outEl = document.getElementById("out");
+let failures = 0;
+
+function note(text) {
+  const li = document.createElement("li");
+  li.textContent = text;
+  checksEl.appendChild(li);
+  return li;
+}
+
+function finish(li, ok, detail) {
+  li.classList.add(ok ? "pass" : "fail");
+  li.textContent = (ok ? "PASS  " : "FAIL  ") + li.textContent + (detail ? "\n" + detail : "");
+  if (!ok) failures++;
+}
+
+async function check(label, fn) {
+  const li = note(label + " …");
+  const t0 = performance.now();
+  try {
+    const detail = await fn();
+    li.textContent = label + ` (${Math.round(performance.now() - t0)} ms)`;
+    finish(li, true, detail);
+  } catch (e) {
+    li.textContent = label;
+    finish(li, false, describeError(e));
+  }
+}
+
+// CheerpJ rejections can be Java exception proxies that throw on String(),
+// so stringify defensively — a broken error reporter is worse than useless.
+function describeError(e) {
+  try {
+    if (e && typeof e.stack === "string") return e.stack;
+    if (e && typeof e.message === "string") return e.message;
+    return String(e);
+  } catch (_) {
+    return "(unstringifiable error — see the browser console for details)";
+  }
+}
+
+function expect(cond, msg, payload) {
+  if (!cond) throw new Error(msg + (payload ? "\n" + payload : ""));
+}
+
+function renderTable(result) {
+  const t = document.createElement("table");
+  t.innerHTML =
+    "<tr>" + result.columns.map(c => `<th>${c}</th>`).join("") + "</tr>" +
+    result.rows.map(r =>
+      "<tr>" + r.map(v => `<td>${v === null ? "∅" : v}</td>`).join("") + "</tr>"
+    ).join("");
+  return t;
+}
+
+let QueryRunner = null;
+
+async function main() {
+  const t0 = performance.now();
+
+  // CheerpJ fetches its runtime and the jar over HTTP; a file:// page has a
+  // null origin and Chrome blocks every fetch. Fail fast with a clear fix
+  // rather than a wall of CORS errors.
+  if (location.protocol === "file:") {
+    verdictEl.className = "fail";
+    verdictEl.innerHTML =
+      "✗ Open this over HTTP, not by double-clicking the file. " +
+      "From the repo root run <code>python -m http.server 8000</code> " +
+      "then visit <code>http://localhost:8000/calcite-spike/</code>. " +
+      "(CheerpJ can't fetch its runtime from a <code>file://</code> page.)";
+    note("Serve over HTTP — file:// pages have a null origin and Chrome blocks the fetches")
+      .classList.add("fail");
+    return;
+  }
+
+  await check("Initialise CheerpJ runtime", async () => {
+    await cheerpjInit();
+    return "cheerpjInit() completed";
+  });
+
+  await check("Load Calcite fat jar (~28 MB, cached after first visit)", async () => {
+    const dir = location.pathname.replace(/\/[^/]*$/, "");
+    const lib = await cheerpjRunLibrary("/app" + dir + "/app/calcite-spike.jar");
+    QueryRunner = await lib.spike.QueryRunner;
+    return "library mode classpath ready";
+  });
+
+  if (!QueryRunner) {
+    verdictEl.className = "fail";
+    verdictEl.textContent = "✗ Spike failed before Calcite could be exercised.";
+    return;
+  }
+
+  await check("Register CSV tables (EMP, DEPT)", async () => {
+    const a = JSON.parse(await QueryRunner.registerCsv("emp", EMP_CSV));
+    const b = JSON.parse(await QueryRunner.registerCsv("dept", DEPT_CSV));
+    expect(!a.error && !b.error, "registration error", a.error || b.error);
+    expect(a.rowCount === 5 && b.rowCount === 3, "unexpected row counts");
+    return `EMP: ${a.columns.map(c => c.name + " " + c.type).join(", ")}`;
+  });
+
+  await check("SELECT 1 — parse, plan, Janino codegen, execute", async () => {
+    const r = JSON.parse(await QueryRunner.run("select 1 as c"));
+    expect(!r.error, "query error", r.error);
+    expect(r.rows.length === 1 && r.rows[0][0] === 1, "wrong result", JSON.stringify(r));
+    return JSON.stringify(r);
+  });
+
+  await check("Join + aggregate across two CSV tables", async () => {
+    const r = JSON.parse(await QueryRunner.run(JOIN_SQL));
+    expect(!r.error, "query error", r.error);
+    expect(r.rows.length === 3 && r.rows[0][0] === "Engineering",
+        "wrong result", JSON.stringify(r));
+    return JSON.stringify(r);
+  });
+
+  await check("EXPLAIN — physical (Enumerable) plan", async () => {
+    const r = JSON.parse(await QueryRunner.explain(JOIN_SQL));
+    expect(!r.error, "explain error", r.error);
+    expect(r.plan.includes("Join("), "no join operator in plan", r.plan);
+    return r.plan;
+  });
+
+  const secs = ((performance.now() - t0) / 1000).toFixed(1);
+  if (failures === 0) {
+    verdictEl.className = "pass";
+    verdictEl.textContent =
+      `✓ Feasible: real Calcite queries (incl. runtime-generated, Janino-compiled ` +
+      `code) executed in this browser in ${secs}s total.`;
+    document.getElementById("run").disabled = false;
+    document.getElementById("explain").disabled = false;
+  } else {
+    verdictEl.className = "fail";
+    verdictEl.textContent = `✗ ${failures} check(s) failed — see details above.`;
+  }
+}
+
+document.getElementById("run").addEventListener("click", async () => {
+  outEl.textContent = "running…";
+  const r = JSON.parse(await QueryRunner.run(document.getElementById("sql").value));
+  outEl.textContent = "";
+  if (r.error) {
+    const pre = document.createElement("pre");
+    pre.textContent = r.error;
+    outEl.appendChild(pre);
+  } else {
+    outEl.appendChild(renderTable(r));
+  }
+});
+
+document.getElementById("explain").addEventListener("click", async () => {
+  outEl.textContent = "planning…";
+  const r = JSON.parse(await QueryRunner.explain(document.getElementById("sql").value));
+  const pre = document.createElement("pre");
+  pre.textContent = r.error || r.plan;
+  outEl.textContent = "";
+  outEl.appendChild(pre);
+});
+
+main();
+</script>
+</body>
+</html>
