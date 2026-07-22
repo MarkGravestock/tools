@@ -1,0 +1,12 @@
+{
+  "name": "calcite-query-explainer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node src/build.mjs",
+    "build:jar": "gradle -p java shadowJar",
+    "test": "node test/plan.test.mjs",
+    "smoke": "node test/engine.test.mjs",
+    "smoke:ui": "node test/ui.smoke.mjs"
+  }
+}

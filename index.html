@@ -120,6 +120,12 @@
       description: "Run a query and get its EXPLAIN (ANALYZE, BUFFERS) plan back as an annotated tree — what each node does, where the time went, and where the planner guessed wrong. Real PostgreSQL compiled to WASM, or your own servers via a local bridge.",
       tags: ["PostgreSQL", "EXPLAIN", "PGlite", "WASM"],
     },
+    {
+      title: "Calcite Query Explainer",
+      href: "calcite-query-explainer/calcite-query-explainer.html",
+      description: "Run SQL against CSV and JSON files in the browser and watch Apache Calcite's optimizer rewrite the query — the logical algebra it starts from and the physical plan it runs, side by side. Real Calcite compiled to WASM via CheerpJ; joins across formats for free.",
+      tags: ["Calcite", "SQL", "Query Plan", "CheerpJ", "WASM"],
+    },
   ];
 
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
