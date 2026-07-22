@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Parquet in WebAssembly</title>
-<meta name="description" content="A Java Apache Parquet reader (Hardwood) compiled to WebAssembly with GraalVM Native Image, running in your browser.">
+<meta name="description" content="Drop a Parquet file and read it in your browser with a Java parser (Hardwood) compiled to WebAssembly by GraalVM Native Image.">
 <script>
   // Set the theme before first paint to avoid a flash of the wrong colours.
   // Shares the "pqe-theme" key with the other tools so the choice persists.
@@ -63,31 +63,44 @@
   .ver { font-family: var(--mono); font-size: 12px; color: var(--pg-text); background: var(--pg-soft); border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
   .theme-toggle { margin-left: auto; align-self: center; padding: 6px 10px; font-size: 15px; line-height: 1;
     font-family: var(--disp); border-radius: 6px; border: 1px solid var(--pg); background: var(--panel); color: var(--pg-text); cursor: pointer; }
-  button.reload { font-family: var(--disp); font-size: 14px; font-weight: 500; padding: 8px 16px; border-radius: 6px;
-    border: 1px solid var(--pg); background: var(--panel); color: var(--pg-text); cursor: pointer; }
 
-  #status { font-family: var(--mono); font-size: 13px; color: var(--muted); min-height: 20px; margin: 4px 0 12px; }
+  .drop { display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+    background: var(--panel); border: 1.5px dashed var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 12px; transition: border-color .15s, background .15s; }
+  .drop.over { border-color: var(--pg); background: var(--pg-soft); }
+  button.pick { font-family: var(--disp); font-size: 14px; font-weight: 500; padding: 8px 16px; border-radius: 6px;
+    border: 1px solid var(--pg); background: var(--pg); color: #fff; cursor: pointer; }
+  button.pick:disabled { opacity: .5; cursor: default; }
+  .drop .hint { font-size: 13.5px; color: var(--muted); }
+  .drop .file { font-family: var(--mono); font-size: 13px; color: var(--pg-text); margin-left: auto; }
+
+  #status { font-family: var(--mono); font-size: 13px; color: var(--muted); min-height: 20px; margin: 2px 0 14px; }
   #status.busy::after { content: " ▍"; animation: blink 1s steps(2) infinite; }
   #status.err { color: var(--amber); }
   @keyframes blink { 50% { opacity: 0; } }
 
-  section { margin-top: 26px; }
+  section { margin-top: 24px; }
+  section[hidden] { display: none; }
   h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
 
-  .outwrap { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--pg); border-radius: 8px; overflow-x: auto; }
-  #out { margin: 0; padding: 14px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; color: var(--ink); white-space: pre; }
-  #out .err { color: var(--amber); }
-  #out .head { color: var(--pg-text); font-weight: 500; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--pg); border-radius: 8px; padding: 8px 14px; min-width: 120px; }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .stat .v { font-family: var(--mono); font-size: 15px; color: var(--ink); margin-top: 2px; word-break: break-word; }
 
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
-  .about { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .tblwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+  th { background: var(--panel-2); font-weight: 500; color: var(--pg-text); position: sticky; top: 0; }
+  td.dim { color: var(--muted); font-style: italic; }
+  tr:last-child td { border-bottom: 0; }
+  .count { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  .about { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-top: 8px; }
   .about h3 { margin: 0 0 8px; font-size: 14px; color: var(--ink); }
   .about p { margin: 0 0 8px; font-size: 13.5px; color: var(--muted); }
+  .about p:last-child { margin-bottom: 0; }
   .about a { color: var(--pg-text); }
   .about code { font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--pg-soft); border-radius: 3px; padding: 1px 5px; }
-  ul.notes { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--muted); }
-  ul.notes li { margin: 3px 0; }
 
   footer { margin-top: 48px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
   footer a { color: var(--pg-text); }
@@ -100,35 +113,37 @@
     <span class="ver" id="ver">loading wasm&hellip;</span>
     <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
   </header>
-  <p class="tagline">A Java program reads an Apache Parquet file &mdash; the <a href="https://github.com/hardwood-hq/hardwood">Hardwood</a> parser decoding <code>alltypes_plain.parquet</code> from <a href="https://github.com/apache/parquet-testing">apache/parquet-testing</a> &mdash; compiled to WebAssembly by <a href="https://www.graalvm.org/latest/reference-manual/web-image/">GraalVM Native Image</a>&rsquo;s experimental wasm backend. It&rsquo;s the GraalVM counterpart to this site&rsquo;s <a href="../calcite-query-explainer/calcite-query-explainer.html">Calcite Query Explainer</a>, which takes the CheerpJ route to Java in the browser. Everything below is the program&rsquo;s output, produced entirely in your browser.</p>
+  <p class="tagline">Drop an Apache Parquet file and read it entirely in your browser &mdash; a Java parser (<a href="https://github.com/hardwood-hq/hardwood">Hardwood</a>) compiled to WebAssembly by <a href="https://www.graalvm.org/latest/reference-manual/web-image/">GraalVM Native Image</a>, called from JavaScript through the wasm backend&rsquo;s <code>@JS</code> interop. It&rsquo;s the GraalVM counterpart to this site&rsquo;s <a href="../calcite-query-explainer/calcite-query-explainer.html">Calcite Query Explainer</a> (which takes the CheerpJ route); your file never leaves the page.</p>
 
-  <p>
-    <button id="reload" class="reload" type="button">Run again</button>
-  </p>
-  <div id="status" class="busy">Loading the wasm module&hellip;</div>
+  <div class="drop" id="drop">
+    <button class="pick" id="pick" disabled>Choose a Parquet file</button>
+    <span class="hint">or drop a <code>.parquet</code> file here</span>
+    <input type="file" id="file" accept=".parquet" hidden>
+    <span class="file" id="fileName"></span>
+  </div>
+  <div id="status" class="busy">Booting the GraalVM WebAssembly runtime&hellip;</div>
 
-  <section>
-    <h2>Program output</h2>
-    <div class="outwrap"><pre id="out"></pre></div>
+  <section id="results" hidden>
+    <h2>File</h2>
+    <div class="meta" id="meta"></div>
+
+    <section>
+      <h2>Schema</h2>
+      <div class="tblwrap"><table id="schema"></table></div>
+    </section>
+
+    <section>
+      <h2>Rows</h2>
+      <div class="tblwrap"><table id="data"></table></div>
+      <div class="count" id="rowCount"></div>
+    </section>
   </section>
 
   <section>
     <h2>About</h2>
-    <div class="cols">
-      <div class="about">
-        <h3>What this is</h3>
-        <p>The same Java code (Hardwood on the single-threaded reader path) runs identically on the JVM, under Node.js, and here in the browser as WebAssembly. The schema, metadata, and all eight rows come out byte-for-byte the same in every runtime.</p>
-        <p>The Parquet file is embedded in the wasm module as a classpath resource, since the wasm target has no filesystem. See the <a href="README.md">README</a> and <a href="COLOPHON.md">colophon</a>; the Java and the build live under <code>java/</code>.</p>
-      </div>
-      <div class="about">
-        <h3>Requirements &amp; notes</h3>
-        <ul class="notes">
-          <li>Needs a browser with <b>WasmGC</b> and <b>exception handling (exnref)</b> — recent Chrome or Firefox, no flags.</li>
-          <li>Served over HTTP (wasm can&rsquo;t load from a <code>file://</code> page). Any static server works; no Range support needed.</li>
-          <li>The GraalVM launcher writes Java&rsquo;s <code>System.out</code> through <code>console.log</code>; this page mirrors that into the panel above.</li>
-          <li>Single-threaded: the wasm backend can&rsquo;t compile Hardwood&rsquo;s virtual-thread pipeline, so a synchronous reader is used.</li>
-        </ul>
-      </div>
+    <div class="about">
+      <p>The Parquet reading is done by the same Java code that runs on a JVM &mdash; here it&rsquo;s ahead-of-time compiled to a single <code>.wasm</code> module, so the program <em>is</em> the WebAssembly. Your file&rsquo;s bytes are base64-encoded and handed to an exported Java function (<code>globalThis.parquetInspect</code>); the schema, metadata, and rows come back as JSON.</p>
+      <p>Needs a browser with <b>WasmGC</b> and <b>exception handling (exnref)</b> &mdash; recent Chrome or Firefox, no flags &mdash; and must be served over HTTP (see the <a href="README.md">README</a> and <a href="COLOPHON.md">colophon</a>). The reader is single-threaded, since the wasm backend can&rsquo;t compile Hardwood&rsquo;s virtual-thread pipeline.</p>
     </div>
   </section>
 
@@ -138,57 +153,132 @@
 </div>
 
 <script>
-  // The GraalVM launcher writes Java's stdout/stderr through console.log /
-  // console.error. Mirror both into the page, keeping the original console too.
-  const out = document.getElementById("out");
-  const statusEl = document.getElementById("status");
-  let sawOutput = false;
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("status");
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  let ready = false;
 
-  function append(text, cssClass) {
-    sawOutput = true;
-    const line = document.createElement("span");
-    // Tint the "=== ... ===" banner lines with the accent colour.
-    if (!cssClass && /^===.*===$/.test(text.trim())) cssClass = "head";
-    if (cssClass) line.className = cssClass;
-    line.textContent = text + "\n";
-    out.appendChild(line);
-  }
-
-  const origLog = console.log.bind(console);
-  const origErr = console.error.bind(console);
-  console.log = (...args) => { origLog(...args); append(args.join(" ")); };
-  console.error = (...args) => { origErr(...args); append(args.join(" "), "err"); };
-  window.addEventListener("error", (e) => {
-    append("Uncaught: " + e.message, "err");
-    setStatus("The module errored — your browser may lack WasmGC/exnref support (needs recent Chrome or Firefox).", "err");
-  });
-
-  function setStatus(msg, kind) {
-    statusEl.textContent = msg;
-    statusEl.className = kind || "";
-  }
+  function setStatus(msg, kind) { statusEl.textContent = msg; statusEl.className = kind || ""; }
 
   // ---- Theme toggle (shares the "pqe-theme" key) --------------------------
   function applyTheme(t) {
     document.documentElement.setAttribute("data-theme", t);
-    const btn = document.getElementById("themeToggle");
+    const btn = $("themeToggle");
     btn.textContent = t === "dark" ? "☀️" : "🌙";
     btn.title = t === "dark" ? "Switch to light mode" : "Switch to dark mode";
     try { localStorage.setItem("pqe-theme", t); } catch (e) {}
   }
   applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
-  document.getElementById("themeToggle").addEventListener("click", () =>
+  $("themeToggle").addEventListener("click", () =>
     applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
-  document.getElementById("reload").addEventListener("click", () => location.reload());
 
-  if (location.protocol === "file:") {
-    setStatus("Open this over HTTP, not from a file:// path — WebAssembly can't load otherwise. Serve the folder (python3 -m http.server 8000) and reload.", "err");
-    document.getElementById("ver").textContent = "needs HTTP";
+  // ---- Bytes → base64 (chunked, avoids call-stack limits) -----------------
+  function toBase64(arrayBuffer) {
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
+
+  // ---- Rendering ----------------------------------------------------------
+  function fmtBytes(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function render(info) {
+    $("meta").innerHTML = [
+      ["Rows", info.numRows],
+      ["Columns", info.columns.length],
+      ["Row groups", info.rowGroups],
+      ["Size", fmtBytes(info.byteCount)],
+      ["Created by", info.createdBy || "—"],
+    ].map(([k, v]) => "<div class='stat'><div class='k'>" + esc(k) + "</div><div class='v'>" + esc(v) + "</div></div>").join("");
+
+    $("schema").innerHTML =
+      "<thead><tr><th>Column</th><th>Physical type</th><th>Logical type</th></tr></thead><tbody>" +
+      info.columns.map((c) =>
+        "<tr><td>" + esc(c.name) + "</td><td>" + esc(c.type) + "</td><td" +
+        (c.logicalType ? ">" + esc(c.logicalType) : " class='dim'>—") + "</td></tr>"
+      ).join("") + "</tbody>";
+
+    const rows = info.rows;
+    $("data").innerHTML =
+      "<thead><tr>" + rows.columns.map((c) => "<th>" + esc(c) + "</th>").join("") + "</tr></thead><tbody>" +
+      rows.values.map((r) => "<tr>" + r.map((v) => "<td>" + esc(v) + "</td>").join("") + "</tr>").join("") +
+      "</tbody>";
+    $("rowCount").textContent = rows.values.length + (rows.values.length === 1 ? " row" : " rows");
+
+    $("results").hidden = false;
+  }
+
+  // ---- Inspect a file's bytes through the wasm ----------------------------
+  async function inspect(arrayBuffer, name) {
+    if (!ready) return;
+    $("fileName").textContent = name;
+    setStatus("Reading " + name + " …", "busy");
+    // Yield so the status paints before the (synchronous) wasm call.
+    await new Promise((r) => setTimeout(r, 0));
+    try {
+      const t0 = performance.now();
+      const json = globalThis.parquetInspect(toBase64(arrayBuffer));
+      const info = JSON.parse(json);
+      if (info.error) { setStatus(info.error, "err"); $("results").hidden = true; return; }
+      render(info);
+      setStatus(`Read ${info.numRows} rows in ${Math.round(performance.now() - t0)} ms.`, "");
+    } catch (e) {
+      setStatus("Failed to read the file: " + (e && e.message ? e.message : e), "err");
+    }
+  }
+
+  // ---- File input + drag/drop ---------------------------------------------
+  $("pick").addEventListener("click", () => $("file").click());
+  $("file").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    if (f) inspect(await f.arrayBuffer(), f.name);
+  });
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", async (e) => {
+    const f = e.dataTransfer.files[0];
+    if (f) inspect(await f.arrayBuffer(), f.name);
+  });
+
+  // ---- Boot: start the VM, then load the bundled sample -------------------
+  async function boot() {
+    if (location.protocol === "file:") {
+      setStatus("Open this over HTTP, not from a file:// path — WebAssembly can't load otherwise. Serve the folder (python3 -m http.server 8000) and reload.", "err");
+      $("ver").textContent = "needs HTTP";
+      return;
+    }
+    if (typeof GraalVM === "undefined") {
+      setStatus("Failed to load parquet-wasm.js — run java/build-wasm.sh to build it.", "err");
+      $("ver").textContent = "not built";
+      return;
+    }
+    try {
+      await GraalVM.run([]);            // runs main() → publishes globalThis.parquetInspect
+      ready = true;
+      $("ver").textContent = "GraalVM · WasmGC";
+      $("pick").disabled = false;
+      setStatus("Ready — choose or drop a Parquet file. Showing the bundled sample.", "");
+      // Load the bundled sample for immediate content.
+      try {
+        const res = await fetch("sample-alltypes.parquet");
+        if (res.ok) await inspect(await res.arrayBuffer(), "sample-alltypes.parquet");
+      } catch (e) { /* sample is optional */ }
+    } catch (e) {
+      setStatus("The WebAssembly runtime failed to start — your browser may lack WasmGC/exnref (needs recent Chrome or Firefox). " + (e && e.message ? e.message : e), "err");
+      $("ver").textContent = "unsupported";
+    }
   }
 </script>
-<!-- Auto-runs demo.WasmDemo on load; the launcher fetches parquet-wasm.js.wasm from the same directory. -->
-<script src="parquet-wasm.js"
-        onload="setStatus('Module loaded — the output above is Java running as WebAssembly.'); document.getElementById('ver').textContent = 'GraalVM · WasmGC';"
-        onerror="setStatus('Failed to load parquet-wasm.js — run java/build-wasm.sh to build it.', 'err'); document.getElementById('ver').textContent = 'not built';"></script>
+<!-- Loads the launcher (defines globalThis.GraalVM); boot() then starts the VM. -->
+<script src="parquet-wasm.js" onload="boot()" onerror="setStatus('Failed to load parquet-wasm.js — run java/build-wasm.sh to build it.', 'err'); document.getElementById('ver').textContent = 'not built';"></script>
 </body>
 </html>

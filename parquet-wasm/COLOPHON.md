@@ -12,13 +12,19 @@ Query Explainer as the other half of a "Java in the browser, two ways" pairing.
 > as a separate tool in this project. align the approach with these tools and
 > presentation
 
+Then, on making it interactive:
+
+> can we add interactivity but by using the cheerpj model instead. i guess
+> graalvm means that we need a java compile phase which limits being able to deal
+> with arbitrary files??
+
 ## Key decisions
 
-- **Faithful re-skin, not a rewrite.** The experiment auto-runs a Java `main`
-  that reads an embedded sample and prints to stdout; the GraalVM launcher
-  mirrors that through `console.log`. The tool keeps exactly that and restyles
-  the page (shared fonts, colours, theme toggle, the `pqe-theme` key), so the
-  behaviour is unchanged and the presentation matches the rest of the site.
+- **Re-skin first, interactivity second.** The experiment auto-runs a Java `main`
+  that reads an embedded sample and prints to stdout. The tool first brought that
+  in as-is under the shared theme (fonts, colours, theme toggle, the `pqe-theme`
+  key); a follow-up then made it interactive (see below), so the page now renders
+  schema/metadata/rows for a file you drop rather than mirroring stdout.
 - **Prebuilt artifacts committed.** Like the Calcite tool's jar, the
   `parquet-wasm.js` launcher and `parquet-wasm.js.wasm` are committed so GitHub
   Pages serves the tool as-is. Regenerating them needs the GraalVM toolchain,
@@ -30,15 +36,34 @@ Query Explainer as the other half of a "Java in the browser, two ways" pairing.
   contrast: CheerpJ ships bytecode to a JVM-in-wasm and interprets it; GraalVM
   compiles the Java to wasm ahead of time, so the program *is* the module.
 
-## Why it stayed a fixed-sample demo
+## Made interactive (follow-up)
 
-Making it an interactive "drop your own Parquet" tool (to truly match the
-Calcite tool's file-drop model) needs GraalVM's experimental JS↔wasm interop:
-exporting a Java function callable from JavaScript and marshalling the file's
-bytes in and structured results out. That's a research task with ~1.5-minute
-build cycles and real risk of not landing, so it's noted as a follow-up rather
-than forced. The value here is the toolchain demonstration — the same Java
-producing identical output on the JVM, Node, and the browser.
+The first cut read a fixed embedded sample. When the question came up of adding
+"drop your own Parquet" — and specifically whether to switch to the CheerpJ
+model to do it — the honest answer was that CheerpJ is the friendlier
+interactivity model (library mode passes data in and out trivially, like the
+Calcite tool), **but Hardwood is compiled to Java 21 bytecode and CheerpJ 4.3
+tops out at Java 17**, so its jar can't load under CheerpJ today. Staying on
+GraalVM and adding interactivity via its JS↔wasm interop turned out to be the
+tractable path.
+
+The interop, once spiked, is small:
+
+- `demo.InteractiveInspector` exports a Java function to JS with the wasm
+  backend's `@JS` annotation: a `native` method whose body is
+  `globalThis.parquetInspect = inspect;`, handed a `Function<JSString,JSString>`
+  in `main`.
+- Built with `-H:-AutoRunVM` (needs `-H:+UnlockExperimentalVMOptions`), so `main`
+  registers the function when the page calls `GraalVM.run([])` instead of running
+  on load. The launcher already exposes `globalThis.GraalVM`.
+- The file crosses the boundary as base64 (a plain string), so no typed-array
+  marshalling — the page decodes nothing, Java base64-decodes to bytes, Hardwood
+  reads, JSON comes back.
+
+De-risked in three steps before wiring the UI: a minimal `echo` export compiled
+and round-tripped under Node; the Parquet→JSON logic verified on a stock JVM; then
+the full `parquetInspect(base64)` path verified end to end under Node
+(`--experimental-wasm-exnref`) against the sample.
 
 ## Notes carried over from the experiment
 
