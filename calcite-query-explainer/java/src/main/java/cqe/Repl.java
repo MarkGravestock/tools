@@ -43,6 +43,9 @@ public final class Repl {
           case "explain":
             out = QueryRunner.explain(decode(parts[1]));
             break;
+          case "rules":
+            out = QueryRunner.rules(decode(parts[1]));
+            break;
           case "quit":
             return;
           default:
