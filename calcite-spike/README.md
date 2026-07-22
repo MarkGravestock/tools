@@ -8,11 +8,14 @@ CheerpJ's library mode.
 
 ## How to run it
 
-Serve the **repo root** (the page loads `calcite-spike/app/calcite-spike.jar`
-relative to the site root, same as GitHub Pages will):
+**It must be served over HTTP** — opening `index.html` directly (`file://`)
+gives a null origin and Chrome blocks every fetch CheerpJ needs, so nothing
+loads. Serve the **repo root** (the page loads
+`calcite-spike/app/calcite-spike.jar` relative to the site root, same as
+GitHub Pages will):
 
 ```sh
-python3 -m http.server 8000   # from the repo root
+python3 -m http.server 8000   # from the repo root (use `python` on Windows)
 ```
 
 Open <http://localhost:8000/calcite-spike/>. The page needs internet access

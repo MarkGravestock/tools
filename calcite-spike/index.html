@@ -116,7 +116,19 @@ async function check(label, fn) {
     finish(li, true, detail);
   } catch (e) {
     li.textContent = label;
-    finish(li, false, String(e && e.stack ? e.stack : e));
+    finish(li, false, describeError(e));
+  }
+}
+
+// CheerpJ rejections can be Java exception proxies that throw on String(),
+// so stringify defensively — a broken error reporter is worse than useless.
+function describeError(e) {
+  try {
+    if (e && typeof e.stack === "string") return e.stack;
+    if (e && typeof e.message === "string") return e.message;
+    return String(e);
+  } catch (_) {
+    return "(unstringifiable error — see the browser console for details)";
   }
 }
 
@@ -138,6 +150,21 @@ let QueryRunner = null;
 
 async function main() {
   const t0 = performance.now();
+
+  // CheerpJ fetches its runtime and the jar over HTTP; a file:// page has a
+  // null origin and Chrome blocks every fetch. Fail fast with a clear fix
+  // rather than a wall of CORS errors.
+  if (location.protocol === "file:") {
+    verdictEl.className = "fail";
+    verdictEl.innerHTML =
+      "✗ Open this over HTTP, not by double-clicking the file. " +
+      "From the repo root run <code>python -m http.server 8000</code> " +
+      "then visit <code>http://localhost:8000/calcite-spike/</code>. " +
+      "(CheerpJ can't fetch its runtime from a <code>file://</code> page.)";
+    note("Serve over HTTP — file:// pages have a null origin and Chrome blocks the fetches")
+      .classList.add("fail");
+    return;
+  }
 
   await check("Initialise CheerpJ runtime", async () => {
     await cheerpjInit();
