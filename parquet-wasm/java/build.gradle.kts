@@ -16,6 +16,14 @@ java {
     }
 }
 
+// InteractiveInspector uses org.graalvm.webimage.api (@JS), which only exists in
+// the GraalVM JDK — build-wasm.sh compiles it with GraalVM's javac. Exclude it
+// from the normal Gradle compile so `runJvm`/`runSync`/`copyDeps` still work on a
+// stock JDK.
+sourceSets.main {
+    java { exclude("**/InteractiveInspector.java") }
+}
+
 // Flat copy of the runtime classpath so build-wasm.sh can hand native-image a
 // simple -cp string.
 val copyDeps = tasks.register<Copy>("copyDeps") {

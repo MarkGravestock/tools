@@ -21,6 +21,7 @@ site root.
 |---|---|
 | [Postgres Query Explainer](postgres-query-explainer/) | Runs `EXPLAIN (ANALYZE, BUFFERS)` in-browser (real Postgres via WASM) — or against your own servers through a local bridge — and renders the plan as an annotated, colour-coded tree. |
 | [Calcite Query Explainer](calcite-query-explainer/) | Runs SQL against CSV, JSON and Parquet files in-browser (real Apache Calcite via WASM/CheerpJ) and shows the optimizer's work: the logical algebra and the physical plan side by side, the rewrite rules it fired, and joins across formats. |
+| [Parquet in WebAssembly](parquet-wasm/) | Drop a Parquet file and read its schema, metadata and rows in-browser with a Java parser (Hardwood) compiled to WebAssembly by GraalVM Native Image — the GraalVM counterpart to the CheerpJ-based Calcite tool. |
 
 ## Adding a tool
 
