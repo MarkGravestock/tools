@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calcite Query Explainer</title>
+<meta name="description" content="Run SQL against CSV and JSON files entirely in your browser and watch Apache Calcite's optimizer rewrite the query plan.">
+<script>
+  // Set the theme before first paint to avoid a flash of the wrong colours.
+  // Shares the "pqe-theme" key with the other tools so the choice persists.
+  (function () {
+    try {
+      var t = localStorage.getItem("pqe-theme");
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { document.documentElement.setAttribute("data-theme", "light"); }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f6f7;
+    --panel: #ffffff;
+    --panel-2: #fafcfd;
+    --ink: #16232b;
+    --muted: #5a7184;
+    --pg: #336791;
+    --pg-text: #336791;
+    --pg-soft: #e3ecf3;
+    --amber: #b45309;
+    --amber-soft: #fdf1e3;
+    --line: #d6dee3;
+    /* Operation-type colours (colour key). White badge text; same in both themes. */
+    --cat-scan: #336791;
+    --cat-join: #7c3aed;
+    --cat-aggregate: #1f7a4d;
+    --cat-sort: #b45309;
+    --cat-combine: #0e7490;
+    --cat-buffer: #b83280;
+    --cat-control: #5b6b78;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --disp: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f171d;
+    --panel: #18232b;
+    --panel-2: #1e2b34;
+    --ink: #dbe7ee;
+    --muted: #90a7b6;
+    --pg: #3f82b3;
+    --pg-text: #6fb0e0;
+    --pg-soft: #1d3546;
+    --amber: #eaa23e;
+    --amber-soft: #382712;
+    --line: #2a3a45;
+  }
+  html { color-scheme: light dark; -webkit-text-size-adjust: 100%; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--disp); font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  h1 .kw { color: var(--pg-text); }
+  .tagline { color: var(--muted); margin: 0 0 18px; max-width: 74ch; }
+  .tagline a, .tagline code { color: var(--pg-text); }
+  .tagline code { font-family: var(--mono); font-size: 0.92em; }
+  .ver { font-family: var(--mono); font-size: 12px; color: var(--pg-text); background: var(--pg-soft); border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
+  .theme-toggle { margin-left: auto; align-self: center; padding: 6px 10px; font-size: 15px; line-height: 1;
+    font-family: var(--disp); border-radius: 6px; border: 1px solid var(--pg); background: var(--panel); color: var(--pg-text); cursor: pointer; }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  button {
+    font-family: var(--disp); font-size: 14px; font-weight: 500;
+    padding: 8px 16px; border-radius: 6px; border: 1px solid var(--pg);
+    background: var(--pg); color: #fff; cursor: pointer;
+  }
+  button.secondary { background: var(--panel); color: var(--pg-text); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--pg); outline-offset: 2px;
+  }
+  select {
+    font-family: var(--disp); font-size: 14px; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); max-width: 100%;
+  }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  #status { font-family: var(--mono); font-size: 13px; color: var(--muted); min-height: 20px; margin-bottom: 10px; white-space: pre-wrap; }
+  #status.err { color: var(--amber); }
+  #status.busy::after { content: " ▍"; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .editorbox { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  textarea {
+    display: block; width: 100%; min-height: 150px; padding: 14px 16px; border: 0; resize: vertical;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.55; color: var(--ink); background: var(--panel); tab-size: 2;
+  }
+  .editorbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line); background: var(--panel-2); flex-wrap: wrap; }
+  .editorbar .spacer { flex: 1; }
+  .exnote { font-size: 13px; color: var(--muted); max-width: 60ch; }
+
+  section { margin-top: 26px; }
+  section[hidden] { display: none; }
+  h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+
+  /* Colour key */
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-bottom: 14px; font-size: 12.5px; color: var(--muted); }
+  .legend .legkey { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+  /* Optimizer diff */
+  .diff { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--pg); border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
+  .diff .chip { font-family: var(--mono); font-size: 12px; border-radius: 4px; padding: 1px 7px; margin: 0 2px; white-space: nowrap; }
+  .diff .add { color: #fff; background: var(--cat-aggregate); }
+  .diff .rem { color: var(--muted); background: var(--pg-soft); text-decoration: line-through; }
+
+  /* Two plan columns */
+  .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 820px) { .plans { grid-template-columns: 1fr; } }
+  .plancol h3 { margin: 0 0 4px; font-size: 15px; font-weight: 700; color: var(--ink); }
+  .plancol .sub { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+
+  /* Plan tree */
+  .node { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px 10px; margin-bottom: 10px; }
+  .nhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .nbadge { font-family: var(--mono); font-weight: 500; font-size: 13px; color: #fff; background: var(--pg); border-radius: 4px; padding: 2px 8px; }
+  .ncat { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .nwhat { margin: 6px 0 2px; font-size: 14px; }
+  .nwhat.unknown { color: var(--amber); }
+  .ndetail { color: var(--muted); font-size: 12.5px; font-family: var(--mono); margin: 4px 0 2px; max-width: 100%; overflow-x: auto; white-space: pre; }
+  .kids { margin-left: 20px; border-left: 2px solid var(--line); padding-left: 14px; margin-top: 10px; }
+  body.compact .nwhat, body.compact .ndetail { display: none; }
+
+  /* Results table */
+  .tblwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+  th { background: var(--panel-2); font-weight: 500; color: var(--pg-text); position: sticky; top: 0; }
+  td.null { color: var(--muted); font-style: italic; }
+  tr:last-child td { border-bottom: 0; }
+  .rowcount { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  details.raw { margin-top: 14px; }
+  details.raw summary { cursor: pointer; color: var(--muted); font-size: 13.5px; }
+  details.raw pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; }
+
+  /* Datasets / schema */
+  .schema { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .schematbl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; }
+  .schematbl b { color: var(--pg-text); font-weight: 500; display: inline-block; margin-bottom: 4px; }
+  .schematbl .fmt { float: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .schematbl span { color: var(--muted); }
+  .schematbl div { line-height: 1.6; }
+
+  footer { margin-top: 48px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+  footer a { color: var(--pg-text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="kw">Calcite</span>, planned</h1>
+    <span class="ver" id="ver">loading Calcite&hellip;</span>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+  </header>
+  <p class="tagline">Run SQL against CSV and JSON files entirely in your browser, and watch <a href="https://calcite.apache.org/">Apache Calcite</a>&rsquo;s optimizer rewrite the query &mdash; the <b>logical</b> relational algebra it starts from, and the <b>physical</b> plan it actually runs. Real Calcite on the <a href="https://cheerpj.com/">CheerpJ</a> WebAssembly JVM; nothing leaves the page.</p>
+
+  <div class="controls">
+    <button id="runBtn" disabled>Run &amp; explain</button>
+    <select id="examplePicker" aria-label="Example queries"></select>
+    <button id="addFile" class="secondary">Add CSV / JSON file</button>
+    <input type="file" id="filePicker" accept=".csv,.json,text/csv,application/json,text/plain" hidden multiple>
+  </div>
+  <p class="exnote" id="exnote"></p>
+
+  <div class="editorbox">
+    <textarea id="sql" spellcheck="false" aria-label="SQL query" placeholder="select ..."></textarea>
+    <div class="editorbar">
+      <span class="hint">Tables are registered from the datasets below. <kbd>Ctrl</kbd>/<kbd>&#8984;</kbd>+<kbd>Enter</kbd> runs.</span>
+      <span class="spacer"></span>
+      <label class="hint" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="compact"> compact</label>
+    </div>
+  </div>
+
+  <div id="status">Booting the CheerpJ runtime and loading Calcite (~28 MB, cached after first visit)&hellip;</div>
+
+  <section id="resultsSection" hidden>
+    <h2>Results</h2>
+    <div class="tblwrap" id="tblwrap"></div>
+    <div class="rowcount" id="rowcount"></div>
+  </section>
+
+  <section id="planSection" hidden>
+    <h2>Query plan</h2>
+    <div class="legend" id="legend"></div>
+    <div class="diff" id="diff" hidden></div>
+    <div class="plans">
+      <div class="plancol">
+        <h3>Logical plan</h3>
+        <p class="sub">Relational algebra straight from your SQL, before physical optimization.</p>
+        <div id="logicalTree"></div>
+      </div>
+      <div class="plancol">
+        <h3>Physical plan</h3>
+        <p class="sub">The optimized <code>Enumerable</code> plan the engine compiles and runs.</p>
+        <div id="physicalTree"></div>
+      </div>
+    </div>
+    <details class="raw">
+      <summary>Raw plan text</summary>
+      <pre id="rawPlan"></pre>
+    </details>
+  </section>
+
+  <section id="dataSection">
+    <h2>Datasets</h2>
+    <div class="schema" id="schema"></div>
+  </section>
+
+  <footer>
+    Real Apache Calcite 1.41 compiled to WebAssembly with CheerpJ. Runs entirely client-side &mdash; see the
+    <a href="README.md">README</a> and <a href="COLOPHON.md">colophon</a>.
+  </footer>
+</div>
+
+<script src="https://cjrtnc.leaningtech.com/4.3/loader.js"></script>
+<script type="module">
+//@@INLINE planlogic.js
+//@@INLINE examples.js
+
+// ---- DOM helpers ----------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function setStatus(msg, kind) {
+  statusEl.textContent = msg;
+  statusEl.className = kind || "";
+}
+
+// ---- Plan rendering -------------------------------------------------------
+function renderTree(container, planText) {
+  container.textContent = "";
+  const root = parsePlan(planText);
+  if (!root) { container.innerHTML = "<p class='hint'>No plan.</p>"; return; }
+  const build = (node) => {
+    const div = document.createElement("div");
+    div.className = "node";
+    const badgeColor = `var(${node.categoryCss})`;
+    let html = "<div class='nhead'>" +
+      "<span class='nbadge' style='background:" + badgeColor + "'>" + esc(node.op) + "</span>" +
+      "<span class='ncat'>" + esc(node.categoryLabel) + "</span></div>";
+    if (node.description) {
+      html += "<div class='nwhat'>" + esc(node.description) + "</div>";
+    } else {
+      html += "<div class='nwhat unknown'>Undocumented operator — see the raw plan.</div>";
+    }
+    if (node.detail) html += "<div class='ndetail'>" + esc(node.detail) + "</div>";
+    div.innerHTML = html;
+    if (node.children.length) {
+      const kids = document.createElement("div");
+      kids.className = "kids";
+      for (const c of node.children) kids.appendChild(build(c));
+      div.appendChild(kids);
+    }
+    return div;
+  };
+  if (root.synthetic) {
+    for (const c of root.children) container.appendChild(build(c));
+  } else {
+    container.appendChild(build(root));
+  }
+}
+
+function renderDiff(logical, physical) {
+  const diffEl = $("diff");
+  const { added, removed } = planDiff(logical, physical);
+  if (!added.length && !removed.length) {
+    diffEl.hidden = true;
+    return;
+  }
+  let html = "The optimizer ";
+  const parts = [];
+  if (added.length) parts.push("introduced " + added.map((o) => "<span class='chip add'>" + esc(o) + "</span>").join(""));
+  if (removed.length) parts.push("replaced " + removed.map((o) => "<span class='chip rem'>" + esc(o) + "</span>").join(""));
+  html += parts.join(", and ") + ".";
+  diffEl.innerHTML = html;
+  diffEl.hidden = false;
+}
+
+function renderLegend() {
+  const seen = new Map();
+  for (const key of Object.keys(CATEGORIES)) seen.set(key, CATEGORIES[key]);
+  $("legend").innerHTML = [...seen.values()].map((c) =>
+    "<span class='legkey'><span class='sw' style='background:var(" + c.css + ")'></span>" + esc(c.label) + "</span>"
+  ).join("");
+}
+
+// ---- Results table --------------------------------------------------------
+function renderResults(result) {
+  const section = $("resultsSection");
+  const wrap = $("tblwrap");
+  if (result.error) {
+    section.hidden = false;
+    wrap.innerHTML = "<p class='hint' style='padding:12px'>" + esc(result.error) + "</p>";
+    $("rowcount").textContent = "";
+    return;
+  }
+  const cols = result.columns;
+  let html = "<table><thead><tr>" + cols.map((c) => "<th>" + esc(c) + "</th>").join("") + "</tr></thead><tbody>";
+  for (const row of result.rows) {
+    html += "<tr>" + row.map((v) =>
+      v === null ? "<td class='null'>null</td>" : "<td>" + esc(v) + "</td>"
+    ).join("") + "</tr>";
+  }
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+  $("rowcount").textContent = result.rows.length + (result.rows.length === 1 ? " row" : " rows");
+  section.hidden = false;
+}
+
+// ---- Datasets / schema panel ---------------------------------------------
+const registered = new Map(); // name -> { format, columns:[{name,type}], rowCount }
+
+function renderSchema() {
+  const el = $("schema");
+  if (registered.size === 0) { el.innerHTML = "<p class='hint'>No tables registered.</p>"; return; }
+  el.innerHTML = [...registered.entries()].map(([name, t]) =>
+    "<div class='schematbl'><span class='fmt'>" + esc(t.format) + "</span><b>" + esc(name) + "</b>" +
+    "<span> · " + t.rowCount + " rows</span><div>" +
+    t.columns.map((c) => esc(c.name) + " <span>" + esc(c.type) + "</span>").join("<br>") +
+    "</div></div>"
+  ).join("");
+}
+
+// ---- Engine bridge --------------------------------------------------------
+let QueryRunner = null;
+
+async function registerTable(name, format, text) {
+  const raw = format === "json"
+    ? await QueryRunner.registerJson(name, text)
+    : await QueryRunner.registerCsv(name, text);
+  const res = JSON.parse(raw);
+  if (res.error) throw new Error(res.error);
+  registered.set(res.table, { format, columns: res.columns, rowCount: res.rowCount });
+  renderSchema();
+  return res;
+}
+
+async function runQuery() {
+  const sql = $("sql").value.trim();
+  if (!sql || !QueryRunner) return;
+  setStatus("Planning and running…", "busy");
+  $("runBtn").disabled = true;
+  try {
+    const t0 = performance.now();
+    const result = JSON.parse(await QueryRunner.run(sql));
+    const plan = JSON.parse(await QueryRunner.explain(sql));
+    const ms = Math.round(performance.now() - t0);
+
+    renderResults(result);
+
+    if (plan.error) {
+      $("planSection").hidden = true;
+    } else {
+      renderDiff(plan.logical, plan.physical);
+      renderTree($("logicalTree"), plan.logical);
+      renderTree($("physicalTree"), plan.physical);
+      $("rawPlan").textContent =
+        "-- LOGICAL --\n" + plan.logical + "\n-- PHYSICAL --\n" + plan.physical;
+      $("planSection").hidden = false;
+    }
+
+    if (result.error) {
+      setStatus(result.error, "err");
+    } else {
+      setStatus(`${result.rows.length} rows · planned & ran in ${ms} ms`, "");
+    }
+  } catch (e) {
+    setStatus(describeError(e), "err");
+  } finally {
+    $("runBtn").disabled = false;
+  }
+}
+
+// CheerpJ rejections can be Java exception proxies that throw on String(), so
+// stringify defensively — a broken error reporter is worse than useless.
+function describeError(e) {
+  try {
+    if (e && typeof e.stack === "string") return e.stack;
+    if (e && typeof e.message === "string") return e.message;
+    return String(e);
+  } catch (_) {
+    return "(unstringifiable error — see the browser console for details)";
+  }
+}
+
+// ---- Examples & files -----------------------------------------------------
+function populateExamples() {
+  const sel = $("examplePicker");
+  let lastGroup = null;
+  let optgroup = null;
+  EXAMPLES.forEach((ex, i) => {
+    if (ex.group !== lastGroup) {
+      optgroup = document.createElement("optgroup");
+      optgroup.label = ex.group;
+      sel.appendChild(optgroup);
+      lastGroup = ex.group;
+    }
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = ex.title;
+    optgroup.appendChild(opt);
+  });
+  sel.addEventListener("change", () => applyExample(Number(sel.value)));
+}
+
+function applyExample(i) {
+  const ex = EXAMPLES[i];
+  if (!ex) return;
+  $("sql").value = ex.sql;
+  $("exnote").textContent = ex.note;
+}
+
+async function handleFiles(files) {
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const format = /\.json$/i.test(file.name) || text.trim().startsWith("[") ? "json" : "csv";
+      const base = file.name.replace(/\.[^.]+$/, "");
+      await registerTable(base, format, text);
+      setStatus(`Registered ${base} from ${file.name}.`, "");
+    } catch (e) {
+      setStatus(`Could not load ${file.name}: ${describeError(e)}`, "err");
+    }
+  }
+}
+
+// ---- Theme toggle (shares the "pqe-theme" key) ----------------------------
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  const btn = $("themeToggle");
+  btn.textContent = t === "dark" ? "☀️" : "🌙";
+  btn.title = t === "dark" ? "Switch to light mode" : "Switch to dark mode";
+  try { localStorage.setItem("pqe-theme", t); } catch (e) {}
+}
+
+// ---- Boot -----------------------------------------------------------------
+async function boot() {
+  renderLegend();
+  populateExamples();
+  applyExample(0);
+  renderSchema();
+
+  applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+  $("themeToggle").addEventListener("click", () =>
+    applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"));
+  $("compact").addEventListener("change", (e) => document.body.classList.toggle("compact", e.target.checked));
+  $("runBtn").addEventListener("click", runQuery);
+  $("sql").addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runQuery(); }
+  });
+  $("addFile").addEventListener("click", () => $("filePicker").click());
+  $("filePicker").addEventListener("change", (e) => handleFiles([...e.target.files]));
+
+  if (location.protocol === "file:") {
+    setStatus("Open this over HTTP, not from a file:// path — CheerpJ can't fetch its runtime otherwise. "
+      + "Serve the folder with a Range-capable server (see README: python serve.py) and reload.", "err");
+    return;
+  }
+
+  try {
+    await cheerpjInit();
+    const dir = location.pathname.replace(/\/[^/]*$/, "");
+    const lib = await cheerpjRunLibrary("/app" + dir + "/app/calcite-query-explainer.jar");
+    QueryRunner = await lib.cqe.QueryRunner;
+  } catch (e) {
+    setStatus("Failed to start Calcite: " + describeError(e), "err");
+    $("ver").textContent = "load failed";
+    return;
+  }
+
+  // Auto-register the sample datasets so the tool works immediately.
+  try {
+    for (const ds of DATASETS) await registerTable(ds.name, ds.format, ds.text);
+  } catch (e) {
+    setStatus("Loaded Calcite, but a sample dataset failed: " + describeError(e), "err");
+  }
+
+  $("ver").textContent = "Calcite 1.41 · CheerpJ";
+  $("runBtn").disabled = false;
+  setStatus("Ready — pick an example or write your own SQL, then Run & explain.", "");
+}
+
+boot();
+</script>
+</body>
+</html>
