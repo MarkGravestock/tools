@@ -126,6 +126,12 @@
       description: "Run SQL against CSV and JSON files in the browser and watch Apache Calcite's optimizer rewrite the query — the logical algebra it starts from and the physical plan it runs, side by side. Real Calcite compiled to WASM via CheerpJ; joins across formats for free.",
       tags: ["Calcite", "SQL", "Query Plan", "CheerpJ", "WASM"],
     },
+    {
+      title: "Parquet in WebAssembly",
+      href: "parquet-wasm/index.html",
+      description: "A Java Apache Parquet reader (Hardwood) compiled to WebAssembly with GraalVM Native Image, reading a sample file in your browser. The GraalVM counterpart to the CheerpJ-based Calcite tool — Java in the browser, two ways.",
+      tags: ["Parquet", "GraalVM", "Native Image", "WASM", "Java"],
+    },
   ];
 
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
