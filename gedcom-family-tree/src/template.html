@@ -594,7 +594,8 @@ function drawLegend() {
       key(cssVar('--f-fill'), cssVar('--f-edge'), 'female') +
       key(cssVar('--u-fill'), cssVar('--u-edge'), 'sex not recorded') +
       '<span class="k"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="' + cssVar('--pg') + '" stroke-width="2"/></svg> marriage</span>' +
-      '<span class="k"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="' + cssVar('--amber') + '" stroke-width="2" stroke-dasharray="4 3"/></svg> ended</span>';
+      '<span class="k"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="' + cssVar('--amber') + '" stroke-width="2" stroke-dasharray="4 3"/></svg> ended</span>' +
+      '<span class="k"><svg width="10" height="12"><line x1="5" y1="0" x2="5" y2="12" stroke="' + cssVar('--rule') + '" stroke-width="1" stroke-dasharray="2 3" opacity="0.7"/></svg> next birth family</span>';
   } else if (by === 'gen') {
     const gens = [...view.generations.keys()].sort((a, b) => a - b);
     box.innerHTML = gens.map((g) => key(cssVar('--panel'), GEN_COLOURS[g % GEN_COLOURS.length], 'gen ' + (g + 1))).join('');
@@ -612,15 +613,28 @@ function draw() {
   if (!view || !view.nodes.length) return;
 
   const root = el('g', { id: 'scene' });
+  const groupLayer = el('g', { class: 'group-dividers' });
   const linkLayer = el('g', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
   const cardLayer = el('g', {});
-  root.append(linkLayer, cardLayer);
+  root.append(groupLayer, linkLayer, cardLayer);
   svg.append(root);
 
   const line = cssVar('--rule');
   const accent = cssVar('--pg');
   const amber = cssVar('--amber');
   const { CARD_H } = view.metrics;
+
+  // ── Sibling-group dividers ──
+  // A married-in spouse sits right beside their partner (correct), which can
+  // look like scattering next to a different birth family without a cue —
+  // so a faint line marks where one birth family's children end and the
+  // next family's begin.
+  for (const b of view.groupBoundaries) {
+    groupLayer.append(el('line', {
+      x1: b.x, x2: b.x, y1: b.y - 14, y2: b.y + CARD_H + 14,
+      stroke: line, 'stroke-width': 1, 'stroke-dasharray': '2 4', opacity: 0.55,
+    }));
+  }
 
   // ── Links ──
   for (const f of view.familyNodes) {

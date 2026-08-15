@@ -12,6 +12,10 @@
 //   4. disconnected components are laid out one after another
 //
 // The result places every person exactly once and every family link explicitly.
+// A married-in spouse sits right beside their partner, which is correct —
+// but can look like scattering next to a *different* birth family's block
+// without a visual cue, so computeGroupBoundaries marks where one sibling
+// group ends and the next begins for the renderer to draw a divider on.
 
 const CARD_W = 152;
 const CARD_H = 62;
@@ -329,6 +333,7 @@ function layoutGraph(individuals, families, options = {}) {
   }
 
   const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+  const groupBoundaries = computeGroupBoundaries(allClusters);
 
   // Family junctions and the links that hang off them.
   const familyNodes = [];
@@ -384,6 +389,7 @@ function layoutGraph(individuals, families, options = {}) {
     generations,
     bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
     metrics: { CARD_W, CARD_H, MATE_GAP, ROW_GAP, ROW_H },
+    groupBoundaries,
   };
 }
 
@@ -392,7 +398,42 @@ function emptyLayout() {
     nodes: [], nodeById: new Map(), familyNodes: [], clusters: [], components: 0,
     generations: new Map(), bounds: { x: 0, y: 0, width: 0, height: 0 },
     metrics: { CARD_W, CARD_H, MATE_GAP, ROW_GAP, ROW_H },
+    groupBoundaries: [],
   };
+}
+
+// A visual aid, not a geometry change: marks where one birth-family's
+// sibling group ends and the next begins within a row, so a card sitting
+// next to an in-law from a different family (expected — a married sibling's
+// spouse sits right beside them) doesn't read as scattering. Two clusters
+// stay in the same group if any member of either shares a parent family
+// (FAMC) with the running set built up so far in the row — so a sibling
+// separated from their run only by their own married-in spouse still counts
+// as continuing it.
+function computeGroupBoundaries(clusters) {
+  const boundaries = [];
+  const rows = new Map();
+  for (const c of clusters) {
+    if (!rows.has(c.gen)) rows.set(c.gen, []);
+    rows.get(c.gen).push(c);
+  }
+  for (const row of rows.values()) {
+    row.sort((a, b) => a.x - b.x);
+    let active = new Set();
+    let started = false;
+    let prevEnd = null;
+    for (const c of row) {
+      const famcs = new Set();
+      for (const m of c.members) for (const f of m.famc) famcs.add(f);
+      const continues = started && [...famcs].some((f) => active.has(f));
+      if (started && !continues) boundaries.push({ x: (prevEnd + c.x) / 2, y: c.gen * ROW_H });
+      if (continues) for (const f of famcs) active.add(f);
+      else active = famcs;
+      started = true;
+      prevEnd = c.x + c.width;
+    }
+  }
+  return boundaries;
 }
 
 // ---- Subset selection -------------------------------------------------------
@@ -438,4 +479,7 @@ function relatedSubset(individuals, startId, up = Infinity, down = Infinity) {
   return picked;
 }
 
-export { layoutGraph, relatedSubset, assignGenerations, findComponents, CARD_W, CARD_H, MATE_GAP, ROW_GAP, ROW_H };
+export {
+  layoutGraph, relatedSubset, assignGenerations, findComponents, computeGroupBoundaries,
+  CARD_W, CARD_H, MATE_GAP, ROW_GAP, ROW_H,
+};

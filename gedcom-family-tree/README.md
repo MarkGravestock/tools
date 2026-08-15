@@ -58,6 +58,11 @@ Marriages are a link between the two cards with the year on it; a dissolved
 marriage is dashed. Children hang off a junction below the couple. A child
 linked by adoption, fostering or a step relationship gets a dashed riser.
 
+A married-in spouse sits right next to their partner, which is correct — but
+without a cue it can look like two unrelated families got mixed together in
+one row. A faint dotted line marks where one birth family's children end and
+the next family's begin, so that adjacency reads as intentional grouping.
+
 ## What it validates
 
 The report groups findings by rule, so a file with 446 mixed-case month names
@@ -94,15 +99,16 @@ npm run build   # inline src/ modules into gedcom-family-tree.html
 npm run smoke   # drives the built file end to end in jsdom
 ```
 
-`npm test` runs 135 assertions against two fixtures: `clean.ged`, which must
+`npm test` runs 138 assertions against two fixtures: `clean.ged`, which must
 produce zero errors and zero warnings, and `quirks.ged`, which reproduces every
 defect found in a real Ancestry.com export and asserts each one is caught. It
 also checks layout invariants — everyone placed once, no overlapping cards,
 children below their parents, couples level, and (given two sibling groups
 joined only through a grandchild-generation marriage) that each family's
 children land in one contiguous block rather than interleaved by raw birth
-year — including for an uncle–niece marriage, which is the case that breaks
-naive generation numbering.
+year, with exactly one divider marker between the two blocks — including for
+an uncle–niece marriage, which is the case that breaks naive generation
+numbering.
 
 `npm run smoke` loads the built HTML, feeds it a GEDCOM and checks the page
 really drew the tree, the report, the detail drawer and the search. It writes

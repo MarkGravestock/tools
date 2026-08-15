@@ -185,6 +185,39 @@ onto the peek itself, and replacing the instant hide with a ~220ms deferred
 one that's cancelled if the pointer lands on either the card or the peek —
 enough to bridge the gap between them without leaving stale peeks around.
 
+### Third pass: a case that looked wrong but wasn't, and a visual fix anyway
+
+> search for 'richard george gravestock' -> show their relatives and walter
+> gravestock renders to the right of eileen mary o'shea
+
+Traced it fully rather than assuming it was a recurrence of the first bug:
+Walter Gravestock (1906–1969) and George Gravestock (1914–1999) are brothers,
+both children of Walter Gravestock Sr. and Alice Hutchins. George married
+Eileen Mary O'Shea. Walter sitting next to Eileen is exactly correct — it's
+the same sibling-plus-in-law adjacency as every other married sibling in the
+tree, not scattering.
+
+One real wrinkle surfaced along the way: in the whole-file view the two
+brothers are correctly ordered by birth year (Walter, being older, to the
+left); in a *focused* view they came out the other way round. A focused
+subset recomputes generations and cluster ownership from scratch on just
+that slice of the graph, and the shared-cluster claiming ambiguity (a married
+person's position can only be "owned" by one side's walk — see the second
+pass, above) can resolve differently when the surrounding context is smaller.
+Confirmed via the cluster seed values directly: `104` (Walter) then `105`
+(George) in the whole file; reversed in the subset. Structural, not a
+regression — the same limitation already documented in the Caveats, just a
+second manifestation of it.
+
+What *is* addressed: this is the second time a correct adjacency has read as
+"mixed" without a click. `computeGroupBoundaries` walks each row and marks
+where one birth family's run of clusters ends and the next begins — two
+clusters continue the same run if any member of either shares a `FAMC`
+family with the accumulated set built up so far, so a sibling separated from
+their block only by their own married-in spouse still counts as continuing
+it. The renderer draws a faint dotted line at each marker. It's an overlay,
+not a geometry change — no existing position math or test needed to move.
+
 ## Versions at build time
 
 No runtime dependencies. jsdom 25 for the smoke test. Fonts: Space Grotesk +
