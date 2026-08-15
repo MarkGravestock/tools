@@ -1,0 +1,2776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GEDCOM Family Tree</title>
+<meta name="description" content="Open a GEDCOM file and see the whole tree drawn at once, with a validation report against the 5.5.1 specification. Runs entirely in your browser.">
+<script>
+  // Set the theme before first paint to avoid a flash of the wrong colours.
+  // Shares the "pqe-theme" key with the other tools so the choice persists across the site.
+  (function () {
+    try {
+      var t = localStorage.getItem("pqe-theme");
+      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) { document.documentElement.setAttribute("data-theme", "light"); }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f6f7;
+    --panel: #ffffff;
+    --panel-2: #fafcfd;
+    --ink: #16232b;
+    --muted: #5a7184;
+    --pg: #336791;
+    --pg-text: #336791;
+    --pg-soft: #e3ecf3;
+    --amber: #b45309;
+    --amber-soft: #fdf1e3;
+    --red: #b91c1c;
+    --red-soft: #fbeaea;
+    --green: #1f7a4d;
+    --line: #d6dee3;
+    /* Card tints. Deliberately quiet — the stripe carries the coding, not the fill. */
+    --m-edge: #3f7fbf; --m-fill: #eef4fa;
+    --f-edge: #a8477e; --f-fill: #fbeef5;
+    --u-edge: #6b7f8c; --u-fill: #f1f4f6;
+    --card-ink: #16232b;
+    --card-sub: #5a7184;
+    --rule: #b9c7d1;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --disp: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f171d;
+    --panel: #18232b;
+    --panel-2: #1e2b34;
+    --ink: #dbe7ee;
+    --muted: #90a7b6;
+    --pg: #3f82b3;
+    --pg-text: #6fb0e0;
+    --pg-soft: #1d3546;
+    --amber: #eaa23e;
+    --amber-soft: #382712;
+    --red: #f08a8a;
+    --red-soft: #3a1d1d;
+    --green: #59c08d;
+    --line: #2a3a45;
+    --m-edge: #5a9fd4; --m-fill: #172836;
+    --f-edge: #d06fa4; --f-fill: #2e1928;
+    --u-edge: #8aa0ad; --u-fill: #1d272e;
+    --card-ink: #dbe7ee;
+    --card-sub: #90a7b6;
+    --rule: #3b4f5d;
+  }
+  html { color-scheme: light dark; -webkit-text-size-adjust: 100%; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--disp); font-size: 15px; line-height: 1.5;
+    height: 100vh; overflow: hidden;
+  }
+
+  button {
+    font-family: var(--disp); font-size: 14px; font-weight: 500;
+    padding: 8px 16px; border-radius: 6px; border: 1px solid var(--pg);
+    background: var(--pg); color: #fff; cursor: pointer;
+  }
+  button.secondary { background: var(--panel); color: var(--pg-text); }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--muted); }
+  button.ghost:hover { border-color: var(--pg); color: var(--pg-text); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible, a:focus-visible {
+    outline: 2px solid var(--pg); outline-offset: 2px;
+  }
+  select, input[type="text"], input[type="search"] {
+    font-family: var(--disp); font-size: 14px; padding: 7px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink);
+    max-width: 100%;
+  }
+  input[type="checkbox"], input[type="range"] { accent-color: var(--pg); }
+  label.toggle { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; white-space: nowrap; }
+  .hint { font-size: 13px; color: var(--muted); }
+  a { color: var(--pg-text); }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; }
+
+  /* ── Landing ─────────────────────────────────────────────────────────── */
+  #landing { height: 100vh; overflow-y: auto; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 60px; }
+  header.doc { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+  h1 .kw { color: var(--pg-text); }
+  .tagline { color: var(--muted); margin: 0 0 22px; max-width: 72ch; }
+  .theme-toggle { margin-left: auto; align-self: center; padding: 6px 10px; font-size: 15px; line-height: 1; }
+  h2 { font-size: 15px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    background: var(--panel); border: 1.5px dashed var(--line); border-radius: 10px;
+    padding: 46px 24px; text-align: center; cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .drop:hover, .drop.over { border-color: var(--pg); background: var(--panel-2); }
+  .drop .big { font-size: 17px; font-weight: 500; }
+  .drop .sub { font-size: 13px; color: var(--muted); font-family: var(--mono); }
+  #filePicker { display: none; }
+  .notecols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; margin-top: 26px; }
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--pg); border-radius: 8px; padding: 13px 15px; }
+  .note b { display: block; font-size: 14px; margin-bottom: 4px; }
+  .note p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  footer.doc { margin-top: 42px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+  #landingStatus { font-family: var(--mono); font-size: 13px; color: var(--muted); min-height: 20px; margin-top: 12px; }
+  #landingStatus.err { color: var(--red); }
+
+  /* ── App shell ───────────────────────────────────────────────────────── */
+  #app { display: none; flex-direction: column; height: 100vh; }
+  #app.on { display: flex; }
+
+  #bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+    flex-shrink: 0; z-index: 5;
+  }
+  #bar .brand { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
+  #bar .brand .kw { color: var(--pg-text); }
+  #bar button { padding: 6px 12px; font-size: 13px; }
+  .vrule { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+  .counts { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .counts b { color: var(--ink); font-weight: 500; }
+  .grow { flex: 1; }
+
+  .searchwrap { position: relative; width: 250px; }
+  .searchwrap input { width: 100%; font-size: 13px; padding: 6px 10px; }
+  #hits {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    max-height: 320px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+  }
+  #hits[hidden] { display: none; }
+  .hit { display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .hit:last-child { border-bottom: 0; }
+  .hit:hover, .hit.on { background: var(--pg-soft); }
+  .hit .yrs { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.M { background: var(--m-edge); } .dot.F { background: var(--f-edge); } .dot.U { background: var(--u-edge); }
+
+  #stage { flex: 1; display: flex; min-height: 0; position: relative; }
+  #canvasWrap { flex: 1; position: relative; overflow: hidden; background: var(--bg); }
+  #canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #canvas.drag { cursor: grabbing; }
+  /* Zoomed far out the labels are sub-pixel noise, so the cards drop to solid
+     blocks and the whole file reads as a map of who sits in which generation. */
+  #scene.far text { display: none; }
+  #scene.far .far-fill { opacity: 1; }
+
+  /* On-canvas controls */
+  .hud { position: absolute; display: flex; gap: 6px; z-index: 3; }
+  .hud.left { left: 12px; bottom: 12px; flex-direction: column; align-items: flex-start; }
+  .hud.right { right: 12px; bottom: 12px; }
+  .hud button {
+    background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+    width: 30px; height: 30px; padding: 0; font-size: 15px; line-height: 1;
+    display: grid; place-items: center;
+  }
+  .hud button:hover { border-color: var(--pg); color: var(--pg-text); }
+  .zoomrow { display: flex; gap: 6px; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
+    padding: 6px 10px; font-size: 12px; color: var(--muted); max-width: 460px;
+  }
+  .legend .k { display: inline-flex; align-items: center; gap: 5px; }
+  .legend .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; border: 1px solid var(--rule); }
+  #zoomLabel { font-family: var(--mono); font-size: 11.5px; color: var(--muted); align-self: center; padding: 0 4px; }
+
+  /* ── Detail drawer ───────────────────────────────────────────────────── */
+  #detail {
+    width: 350px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; overflow: hidden;
+    margin-right: -350px; transition: margin-right 0.22s ease;
+  }
+  #detail.open { margin-right: 0; }
+  @media (prefers-reduced-motion: reduce) { #detail { transition: none; } }
+  .dhead { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start; }
+  .dhead h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; }
+  .dhead .sur { color: var(--pg-text); }
+  .dhead .meta { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+  .xbtn { margin-left: auto; background: none; border: 0; color: var(--muted); font-size: 17px; cursor: pointer; padding: 0 2px; line-height: 1; }
+  .xbtn:hover { color: var(--ink); }
+  .dbody { padding: 14px 16px 24px; overflow-y: auto; flex: 1; }
+  .dsec { margin-bottom: 18px; }
+  .dsec > h4 {
+    margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .ev { border-left: 2px solid var(--line); padding: 0 0 0 10px; margin-bottom: 10px; }
+  .ev .lbl { font-size: 13.5px; font-weight: 500; }
+  .ev .when { font-family: var(--mono); font-size: 12px; color: var(--pg-text); }
+  .ev .where { font-size: 12.5px; color: var(--muted); }
+  .ev .txt { font-size: 12.5px; color: var(--muted); white-space: pre-wrap; margin-top: 3px; }
+  .ev.odd { border-left-color: var(--amber); }
+  .plink {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 6px 4px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+    background: none; color: var(--ink); font-size: 13px; font-weight: 400; cursor: pointer;
+  }
+  .plink:hover { background: var(--pg-soft); }
+  .plink .yrs { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .plink .rel { font-family: var(--mono); font-size: 10.5px; color: var(--amber); }
+  .dactions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .dactions button { font-size: 12.5px; padding: 6px 11px; }
+  .kv { font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+  .kv b { color: var(--ink); font-weight: 500; }
+
+  /* ── Report sheet ────────────────────────────────────────────────────── */
+  #sheet {
+    position: absolute; inset: 0; z-index: 20; background: var(--bg);
+    overflow-y: auto; display: none;
+  }
+  #sheet.on { display: block; }
+  .sheetbar {
+    position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .sheetbar h2 { margin: 0; }
+  .verdict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+  .chip {
+    font-family: var(--mono); font-size: 12px; border-radius: 20px; padding: 3px 11px;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .chip.error { color: var(--red); background: var(--red-soft); border-color: var(--red); }
+  .chip.warning { color: var(--amber); background: var(--amber-soft); border-color: var(--amber); }
+  .chip.info { color: var(--pg-text); background: var(--pg-soft); border-color: var(--pg); }
+  .chip.ok { color: var(--green); background: var(--pg-soft); border-color: var(--green); }
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 11px 14px; }
+  .stat .n { font-family: var(--mono); font-size: 20px; color: var(--pg-text); }
+  .stat .l { font-size: 12px; color: var(--muted); }
+  .finding {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line);
+    border-radius: 8px; padding: 12px 15px; margin-bottom: 10px;
+  }
+  .finding.error { border-left-color: var(--red); }
+  .finding.warning { border-left-color: var(--amber); }
+  .finding.info { border-left-color: var(--pg); }
+  .fhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .fhead .t { font-size: 14.5px; font-weight: 500; }
+  .fhead .cat { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .fhead .n { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .finding p { margin: 5px 0 0; font-size: 13.5px; color: var(--muted); max-width: 90ch; }
+  .samples { margin: 8px 0 0; padding: 0; list-style: none; }
+  .samples li {
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px;
+    padding: 3px 8px; margin-top: 4px; overflow-x: auto; white-space: nowrap;
+  }
+  .samples .ln { color: var(--pg-text); }
+  .filterrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  .filterrow button { padding: 5px 11px; font-size: 12.5px; }
+  .filterrow button[aria-pressed="true"] { background: var(--pg); color: #fff; border-color: var(--pg); }
+
+  #empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
+  #empty[hidden] { display: none; }
+
+  @media (max-width: 900px) {
+    #detail { position: absolute; right: 0; top: 0; bottom: 0; z-index: 10; width: min(350px, 92vw); margin-right: -100%; }
+    #detail.open { margin-right: 0; box-shadow: -8px 0 30px rgba(0,0,0,0.25); }
+    .searchwrap { width: 170px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ══ Landing ═══════════════════════════════════════════════════════════ -->
+<div id="landing">
+  <div class="wrap">
+    <header class="doc">
+      <h1><span class="kw">GEDCOM</span> Family Tree</h1>
+      <button id="themeToggle" class="secondary theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+    </header>
+    <p class="tagline">
+      Open a GEDCOM file and see the whole thing at once &mdash; every individual, every family,
+      every disconnected branch &mdash; laid out by generation. Alongside the tree you get a report
+      on how the file measures up against the GEDCOM 5.5.1 specification: broken links, dates that
+      are not dates, tags in places the specification does not allow.
+    </p>
+
+    <div class="drop" id="drop" role="button" tabindex="0" aria-label="Choose a GEDCOM file">
+      <div class="big">Drop a GEDCOM file here, or click to choose one</div>
+      <div class="sub">.ged &middot; .gedcom &middot; .txt</div>
+    </div>
+    <input type="file" id="filePicker" accept=".ged,.gedcom,.txt,text/plain">
+    <div id="landingStatus"></div>
+
+    <div class="notecols">
+      <div class="note">
+        <b>Nothing is uploaded</b>
+        <p>The file is read in the page with the browser's own file reader. There is no server,
+          no account, and no network request &mdash; you can open this page offline and it still works.</p>
+      </div>
+      <div class="note">
+        <b>The whole graph, not one branch</b>
+        <p>A family file is a graph: people remarry, cousins marry, and most exports hold several
+          unconnected families. Everyone is placed, once, on a generation grid.</p>
+      </div>
+      <div class="note">
+        <b>Validated against 5.5.1</b>
+        <p>Grammar, cross-references, date values, record structure and internal consistency, each
+          finding grouped with a count, an explanation and sample line numbers.</p>
+      </div>
+    </div>
+
+    <footer class="doc">
+      Part of a small collection of single-file browser tools. GEDCOM 5.5.1 is the
+      lineage-linked file format published by The Church of Jesus Christ of Latter-day Saints in 1999.
+    </footer>
+  </div>
+</div>
+
+<!-- ══ App ═══════════════════════════════════════════════════════════════ -->
+<div id="app">
+  <div id="bar">
+    <div class="brand"><span class="kw">GEDCOM</span> Family Tree</div>
+    <div class="vrule"></div>
+
+    <div class="searchwrap">
+      <input type="search" id="search" placeholder="Search people…" autocomplete="off" aria-label="Search people">
+      <div id="hits" hidden></div>
+    </div>
+
+    <select id="viewMode" aria-label="What to show">
+      <option value="all">Everyone</option>
+      <option value="focus">Around one person</option>
+    </select>
+    <label class="toggle" id="depthWrap" hidden>
+      <span>generations</span>
+      <input type="range" id="depth" min="1" max="8" value="3" style="width:80px">
+      <span id="depthLabel" class="counts">3</span>
+    </label>
+
+    <select id="colourBy" aria-label="Colour cards by">
+      <option value="sex">Colour: sex</option>
+      <option value="gen">Colour: generation</option>
+      <option value="none">Colour: none</option>
+    </select>
+
+    <div class="grow"></div>
+    <div class="counts" id="counts"></div>
+    <div class="vrule"></div>
+    <button class="secondary" id="btnReport">Report</button>
+    <button class="ghost" id="btnSvg" title="Download the current view as an SVG file">SVG</button>
+    <button class="ghost" id="btnNew">Open another</button>
+    <button class="secondary theme-toggle" id="themeToggle2" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+  </div>
+
+  <div id="stage">
+    <div id="canvasWrap">
+      <svg id="canvas" role="img" aria-label="Family tree"></svg>
+      <div id="empty" hidden>Nothing to draw for this selection.</div>
+
+      <div class="hud left">
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="hud right">
+        <div class="zoomrow">
+          <button id="btnOut" title="Zoom out (−)" aria-label="Zoom out">−</button>
+          <span id="zoomLabel">100%</span>
+          <button id="btnIn" title="Zoom in (+)" aria-label="Zoom in">+</button>
+          <button id="btnFit" title="Fit to window (F)" aria-label="Fit to window">⊡</button>
+        </div>
+      </div>
+    </div>
+
+    <aside id="detail" aria-label="Person detail">
+      <div class="dhead">
+        <div>
+          <h3 id="dName"></h3>
+          <div class="meta" id="dMeta"></div>
+        </div>
+        <button class="xbtn" id="dClose" aria-label="Close detail">✕</button>
+      </div>
+      <div class="dbody" id="dBody"></div>
+    </aside>
+
+    <!-- Validation report -->
+    <div id="sheet">
+      <div class="sheetbar">
+        <h2>Specification report</h2>
+        <div class="grow"></div>
+        <button class="secondary" id="sheetClose">Back to the tree</button>
+      </div>
+      <div class="wrap" id="sheetBody"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+// GEDCOM 5.5.1 lineage-linked parser. No DOM, no dependencies — the browser
+// page and the Node test suite both import this.
+//
+// Three stages, each usable on its own:
+//   tokenizeGedcom(text)  -> flat lines with level/xref/tag/value + syntax problems
+//   buildRecords(lines)   -> a record tree, with CONC/CONT folded into values
+//   buildModel(records)   -> individuals/families with events, names and links
+// parseGedcom(text) runs all three.
+
+// ---- Tags -------------------------------------------------------------------
+
+// INDIVIDUAL_EVENT_STRUCTURE + INDIVIDUAL_ATTRIBUTE_STRUCTURE (5.5.1 p.32-34).
+const INDI_EVENT_TAGS = {
+  BIRT: 'Born', CHR: 'Christened', DEAT: 'Died', BURI: 'Buried', CREM: 'Cremated',
+  ADOP: 'Adopted', BAPM: 'Baptised', BARM: 'Bar mitzvah', BASM: 'Bas mitzvah',
+  BLES: 'Blessing', CHRA: 'Adult christening', CONF: 'Confirmed', FCOM: 'First communion',
+  ORDN: 'Ordained', NATU: 'Naturalised', EMIG: 'Emigrated', IMMI: 'Immigrated',
+  CENS: 'Census', PROB: 'Probate', WILL: 'Will', GRAD: 'Graduated', RETI: 'Retired',
+  EVEN: 'Event',
+};
+const INDI_ATTR_TAGS = {
+  CAST: 'Caste', DSCR: 'Description', EDUC: 'Education', IDNO: 'ID number',
+  NATI: 'Nationality', NCHI: 'Children', NMR: 'Marriages', OCCU: 'Occupation',
+  PROP: 'Property', RELI: 'Religion', RESI: 'Residence', SSN: 'Social security number',
+  TITL: 'Title', FACT: 'Fact',
+};
+// FAMILY_EVENT_STRUCTURE (5.5.1 p.31).
+const FAM_EVENT_TAGS = {
+  ANUL: 'Annulled', CENS: 'Census', DIV: 'Divorced', DIVF: 'Divorce filed',
+  ENGA: 'Engaged', MARR: 'Married', MARB: 'Marriage banns', MARC: 'Marriage contract',
+  MARL: 'Marriage licence', MARS: 'Marriage settlement', RESI: 'Residence', EVEN: 'Event',
+};
+// Vendor extensions seen in the wild that carry a date/place worth showing.
+const EXT_EVENT_TAGS = {
+  _MILT: 'Military service', _EMPLOY: 'Employment', _DEG: 'Degree', _ELEC: 'Election',
+  _EXCM: 'Excommunicated', _FUN: 'Funeral', _MDCL: 'Medical', _MILTID: 'Military ID',
+  _NAMS: 'Namesake', _WEIG: 'Weight', _HEIG: 'Height',
+};
+
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const MONTH_FULL = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY',
+  'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// ---- Stage 1: tokenize ------------------------------------------------------
+
+// A GEDCOM line is `level [xref] tag [value]`, delimiter is one space. Real
+// files pad and indent, so the split is lenient; anything that still cannot be
+// read is reported rather than silently dropped.
+const LINE_RE = /^(\d+)(?:[ \t]+(@[^@\s]*@))?[ \t]+([A-Za-z0-9_]+)(?:[ \t](.*))?$/;
+
+function tokenizeGedcom(text) {
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1); // strip UTF-8 BOM
+  // Split on CRLF, LF or a lone CR (old Mac exports).
+  const raw = text.split(/\r\n|\n|\r/);
+  const lines = [];
+  const problems = [];
+  let blank = 0;
+
+  for (let i = 0; i < raw.length; i++) {
+    const s = raw[i];
+    if (s.trim() === '') { if (i < raw.length - 1 && s !== '') blank++; continue; }
+    const m = LINE_RE.exec(s.replace(/^[ \t]+/, ''));
+    if (!m) {
+      problems.push({ line: i + 1, text: s.slice(0, 120) });
+      continue;
+    }
+    lines.push({
+      no: i + 1,
+      level: parseInt(m[1], 10),
+      xref: m[2] || null,
+      tag: m[3].toUpperCase(),
+      value: m[4] === undefined ? '' : m[4],
+      length: s.length,
+    });
+  }
+  return { lines, problems, blankLines: blank };
+}
+
+// ---- Stage 2: records -------------------------------------------------------
+
+// `@@` is the escape for a literal `@` in a value (5.5.1 p.11).
+const unescapeAt = (s) => s.replace(/@@/g, '@');
+const isPointer = (s) => /^@[^@\s]+@$/.test(s.trim());
+
+// Folds CONC (join) and CONT (newline) continuation lines into their parent's
+// value, which is what makes long notes and source text survive the parse.
+function buildRecords(lines) {
+  const records = [];
+  const stack = [];
+  const problems = [];
+
+  for (const l of lines) {
+    if (l.level === 0) {
+      const node = { tag: l.tag, xref: l.xref, value: unescapeAt(l.value), children: [], line: l.no };
+      records.push(node);
+      stack.length = 0;
+      stack[0] = node;
+      continue;
+    }
+    const parent = stack[l.level - 1];
+    if (!parent) {
+      problems.push({ line: l.no, tag: l.tag, level: l.level, kind: 'orphan' });
+      continue;
+    }
+    if (l.tag === 'CONC' || l.tag === 'CONT') {
+      parent.value += (l.tag === 'CONT' ? '\n' : '') + unescapeAt(l.value);
+      // Keep the level stack sane if something nests under a continuation.
+      stack[l.level] = parent;
+      continue;
+    }
+    const node = { tag: l.tag, xref: l.xref, value: unescapeAt(l.value), children: [], line: l.no };
+    parent.children.push(node);
+    stack.length = l.level + 1;
+    stack[l.level] = node;
+  }
+  return { records, problems };
+}
+
+const kids = (node, tag) => (node ? node.children.filter((c) => c.tag === tag) : []);
+const kid = (node, tag) => kids(node, tag)[0] || null;
+const kidValue = (node, tag) => { const c = kid(node, tag); return c ? c.value : ''; };
+
+// ---- Dates ------------------------------------------------------------------
+
+// A GEDCOM DATE_VALUE, plus the near-misses genealogy programs actually emit
+// (full month names, dd/mm/yyyy, "1914-1920", "Abt."). `conforming` records
+// whether the original was strict 5.5.1 — the validator reports on it, the
+// viewer just uses whatever could be read.
+const DATE_MODIFIERS = [
+  [/^(?:ABT|ABOUT|ABT\.|CIRCA|CA\.?|C\.)\s+/i, 'about', 'abt.'],
+  [/^(?:EST|ESTIMATED)\s+/i, 'estimated', 'est.'],
+  [/^(?:CAL|CALCULATED)\s+/i, 'calculated', 'calc.'],
+  [/^(?:BEF|BEFORE)\s+/i, 'before', 'before'],
+  [/^(?:AFT|AFTER)\s+/i, 'after', 'after'],
+];
+
+function parseDatePart(s) {
+  if (!s) return null;
+  let t = s.trim().replace(/^@#D[A-Z0-9 ]*@\s*/i, ''); // drop calendar escape
+  let m;
+
+  // 12 JAN 1898 / 12 January 1898
+  if ((m = /^(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{3,4})(\/\d{1,2})?$/.exec(t))) {
+    const mo = monthIndex(m[2]);
+    if (mo >= 0) return { day: +m[1], month: mo, year: +m[3], dual: m[4] || '' };
+  }
+  // JAN 1898 / January 1898
+  if ((m = /^([A-Za-z]{3,9})\.?\s+(\d{3,4})(\/\d{1,2})?$/.exec(t))) {
+    const mo = monthIndex(m[1]);
+    if (mo >= 0) return { day: null, month: mo, year: +m[2], dual: m[3] || '' };
+  }
+  // 1898 / 1898/99
+  if ((m = /^(\d{3,4})(\/\d{1,2})?$/.exec(t))) return { day: null, month: null, year: +m[1], dual: m[2] || '' };
+  // 1898-01-12 (ISO) — not GEDCOM, but unambiguous
+  if ((m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t))) return { day: +m[3], month: +m[2] - 1, year: +m[1], dual: '' };
+  // 29/12/1903 — day-first; treat 13+ in the first slot as the day either way
+  if ((m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t))) {
+    let d = +m[1], mo = +m[2];
+    if (mo > 12 && d <= 12) { const t2 = d; d = mo; mo = t2; }
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) return { day: d, month: mo - 1, year: +m[3], dual: '' };
+  }
+  // JAN / January on its own
+  if ((m = /^([A-Za-z]{3,9})\.?$/.exec(t))) {
+    const mo = monthIndex(m[1]);
+    if (mo >= 0) return { day: null, month: mo, year: null, dual: '' };
+  }
+  return null;
+}
+
+function monthIndex(name) {
+  const u = name.toUpperCase();
+  let i = MONTHS.indexOf(u);
+  if (i >= 0) return i;
+  i = MONTH_FULL.indexOf(u);
+  if (i >= 0) return i;
+  return -1;
+}
+
+function showPart(p) {
+  if (!p) return '';
+  const y = p.year === null ? '' : String(p.year) + p.dual;
+  if (p.month === null) return y;
+  const mo = MONTH_NAMES[p.month];
+  if (p.day === null) return (mo + ' ' + y).trim();
+  return (p.day + ' ' + mo + ' ' + y).trim();
+}
+
+// Strict 5.5.1 DATE_VALUE, used only to judge conformance.
+const STRICT_MON = MONTHS.join('|');
+const STRICT_DATE = String.raw`(?:@#D[A-Z ]+@ )?(?:\d{1,2} )?(?:(?:${STRICT_MON}) )?\d{3,4}(?:\/\d{2})?`;
+const STRICT_DATE_VALUE = new RegExp(
+  `^(?:${STRICT_DATE}|ABT ${STRICT_DATE}|CAL ${STRICT_DATE}|EST ${STRICT_DATE}` +
+  `|AFT ${STRICT_DATE}|BEF ${STRICT_DATE}|BET ${STRICT_DATE} AND ${STRICT_DATE}` +
+  `|FROM ${STRICT_DATE}|TO ${STRICT_DATE}|FROM ${STRICT_DATE} TO ${STRICT_DATE}` +
+  `|INT ${STRICT_DATE}(?: \\(.*\\))?|\\(.*\\))$`
+);
+
+function parseGedcomDate(raw) {
+  const out = {
+    raw: raw || '', display: '', year: null, sortKey: null,
+    qualifier: '', conforming: false, parsed: false, phrase: '',
+  };
+  if (!raw || !raw.trim()) return out;
+  const s = raw.trim();
+  out.conforming = STRICT_DATE_VALUE.test(s);
+
+  let m;
+  // Interpreted / free-text phrase
+  if ((m = /^INT\s+(.*?)\s*(\(.*\))?$/i.exec(s))) {
+    const p = parseDatePart(m[1]);
+    if (p) { finish(out, p, p, 'interpreted'); out.phrase = m[2] || ''; return out; }
+  }
+  if (/^\(.*\)$/.test(s)) { out.display = s.replace(/^\(|\)$/g, ''); out.phrase = s; return out; }
+
+  // Ranges and periods
+  if ((m = /^BET(?:WEEN)?\s+(.+?)\s+AND\s+(.+)$/i.exec(s))) return range(out, m[1], m[2], 'between', '–');
+  if ((m = /^FROM\s+(.+?)\s+TO\s+(.+)$/i.exec(s))) return range(out, m[1], m[2], 'from-to', '–');
+  if ((m = /^FROM\s+(.+)$/i.exec(s))) return single(out, m[1], 'from', 'from ');
+  if ((m = /^TO\s+(.+)$/i.exec(s))) return single(out, m[1], 'to', 'to ');
+  // "1914-1920" / "2003-2005" — a period written the way people write periods
+  if ((m = /^(\d{4})\s*[-–]\s*(\d{4})$/.exec(s))) return range(out, m[1], m[2], 'from-to', '–');
+
+  for (const [re, name, prefix] of DATE_MODIFIERS) {
+    if (re.test(s)) return single(out, s.replace(re, ''), name, prefix + ' ');
+  }
+  return single(out, s, '', '');
+}
+
+function single(out, part, qualifier, prefix) {
+  const p = parseDatePart(part);
+  out.qualifier = qualifier;
+  if (!p) { out.display = part.trim(); return out; }
+  finish(out, p, p, qualifier);
+  out.display = (prefix + showPart(p)).trim();
+  return out;
+}
+
+function range(out, a, b, qualifier, sep) {
+  const pa = parseDatePart(a), pb = parseDatePart(b);
+  out.qualifier = qualifier;
+  if (!pa && !pb) { out.display = (a + ' ' + sep + ' ' + b).trim(); return out; }
+  finish(out, pa || pb, pb || pa, qualifier);
+  out.display = (qualifier === 'between' ? 'between ' : '') +
+    showPart(pa) + sep + showPart(pb);
+  return out;
+}
+
+function finish(out, start, end) {
+  out.parsed = true;
+  const p = start || end;
+  out.year = p.year;
+  out.sortKey = p.year === null ? null
+    : p.year * 10000 + (p.month === null ? 0 : (p.month + 1) * 100) + (p.day || 0);
+  if (!out.display) out.display = showPart(p);
+  out.endYear = end ? end.year : p.year;
+}
+
+// ---- Names ------------------------------------------------------------------
+
+// PERSONAL_NAME_STRUCTURE: "Given /Surname/ Suffix", with optional GIVN/SURN/
+// NPFX/NSFX/NICK/SPFX subordinates that win when the slash form is absent.
+function parseName(node) {
+  const raw = (node.value || '').replace(/\s+/g, ' ').trim();
+  const n = {
+    raw, given: '', surname: '', prefix: '', suffix: '', nickname: '',
+    type: kidValue(node, 'TYPE'), full: '', hasSlashes: /\/[^/]*\//.test(raw),
+  };
+  const m = /^(.*?)\s*\/([^/]*)\/\s*(.*)$/.exec(raw);
+  if (m) {
+    n.given = m[1].trim();
+    n.surname = m[2].trim();
+    n.suffix = m[3].trim();
+  } else {
+    n.given = raw;
+  }
+  n.given = kidValue(node, 'GIVN') || n.given;
+  n.surname = kidValue(node, 'SURN') || n.surname;
+  n.prefix = kidValue(node, 'NPFX') || n.prefix;
+  n.suffix = kidValue(node, 'NSFX') || n.suffix;
+  n.nickname = kidValue(node, 'NICK') || n.nickname;
+  const spfx = kidValue(node, 'SPFX');
+  if (spfx && !n.surname.startsWith(spfx)) n.surname = (spfx + ' ' + n.surname).trim();
+
+  n.full = [n.prefix, n.given, n.surname, n.suffix].filter(Boolean).join(' ').trim();
+  if (!n.full) n.full = '(unknown)';
+  return n;
+}
+
+// ---- Events -----------------------------------------------------------------
+
+function parseEvent(node, label) {
+  const dateNode = kid(node, 'DATE');
+  const place = kidValue(node, 'PLAC').trim().replace(/\s*,\s*$/, '');
+  const ev = {
+    tag: node.tag,
+    label: kidValue(node, 'TYPE') || label,
+    // A bare `1 DEAT Y` asserts the event happened without saying when.
+    asserted: node.value.trim().toUpperCase() === 'Y',
+    value: node.value.trim(),
+    date: parseGedcomDate(dateNode ? dateNode.value : ''),
+    place,
+    age: kidValue(node, 'AGE'),
+    cause: kidValue(node, 'CAUS'),
+    agency: kidValue(node, 'AGNC'),
+    notes: collectNotes(node),
+    sourceRefs: kids(node, 'SOUR').map((s) => ({
+      ref: isPointer(s.value) ? s.value.trim() : null,
+      page: kidValue(s, 'PAGE'),
+      text: (kid(kid(s, 'DATA'), 'TEXT') || {}).value || '',
+      url: kidValue(kid(s, 'DATA'), 'WWW'),
+    })),
+    objectRefs: kids(node, 'OBJE').filter((o) => isPointer(o.value)).map((o) => o.value.trim()),
+    line: node.line,
+  };
+  ev.hasContent = !!(ev.date.raw || ev.place || ev.asserted || ev.notes.length ||
+    ev.value || ev.age || ev.cause);
+  return ev;
+}
+
+function collectNotes(node) {
+  return kids(node, 'NOTE')
+    .map((n) => (isPointer(n.value) ? { ref: n.value.trim(), text: '' } : { ref: null, text: n.value }))
+    .filter((n) => n.ref || n.text.trim());
+}
+
+// ---- Stage 3: model ---------------------------------------------------------
+
+function buildModel(records) {
+  const individuals = new Map();
+  const families = new Map();
+  const sources = new Map();
+  const objects = new Map();
+  const notes = new Map();
+  const repositories = new Map();
+  const submitters = new Map();
+  const other = [];
+  let header = null;
+  let anonymous = 0;
+
+  for (const rec of records) {
+    switch (rec.tag) {
+      case 'HEAD': header = parseHeader(rec); break;
+      case 'TRLR': break;
+      case 'INDI': {
+        const id = rec.xref || '@_INDI' + (++anonymous) + '@';
+        individuals.set(id, parseIndividual(rec, id));
+        break;
+      }
+      case 'FAM': {
+        const id = rec.xref || '@_FAM' + (++anonymous) + '@';
+        families.set(id, parseFamily(rec, id));
+        break;
+      }
+      case 'SOUR':
+        if (rec.xref) sources.set(rec.xref, {
+          id: rec.xref, title: kidValue(rec, 'TITL'), author: kidValue(rec, 'AUTH'),
+          publication: kidValue(rec, 'PUBL'), repo: kidValue(rec, 'REPO'),
+          text: kidValue(rec, 'TEXT'), notes: collectNotes(rec), line: rec.line,
+        });
+        break;
+      case 'OBJE':
+        if (rec.xref) {
+          const file = kid(rec, 'FILE');
+          objects.set(rec.xref, {
+            id: rec.xref,
+            file: file ? file.value.trim() : '',
+            format: file ? kidValue(file, 'FORM') : kidValue(rec, 'FORM'),
+            title: (file ? kidValue(file, 'TITL') : '') || kidValue(rec, 'TITL'),
+            description: kidValue(rec, '_DSCR'),
+            date: parseGedcomDate(kidValue(rec, 'DATE')),
+            place: kidValue(rec, 'PLAC'),
+            line: rec.line,
+          });
+        }
+        break;
+      case 'NOTE': if (rec.xref) notes.set(rec.xref, { id: rec.xref, text: rec.value, line: rec.line }); break;
+      case 'REPO': if (rec.xref) repositories.set(rec.xref, { id: rec.xref, name: kidValue(rec, 'NAME'), line: rec.line }); break;
+      case 'SUBM': if (rec.xref) submitters.set(rec.xref, { id: rec.xref, name: kidValue(rec, 'NAME'), line: rec.line }); break;
+      default: other.push({ tag: rec.tag, xref: rec.xref, line: rec.line });
+    }
+  }
+
+  const repairs = linkModel(individuals, families);
+  return { header, individuals, families, sources, objects, notes, repositories, submitters, other, repairs };
+}
+
+function parseHeader(rec) {
+  const sour = kid(rec, 'SOUR');
+  const gedc = kid(rec, 'GEDC');
+  return {
+    source: sour ? sour.value : '',
+    sourceName: sour ? kidValue(sour, 'NAME') : '',
+    sourceVersion: sour ? kidValue(sour, 'VERS') : '',
+    tree: sour ? kidValue(sour, '_TREE') : '',
+    date: kidValue(rec, 'DATE'),
+    version: gedc ? kidValue(gedc, 'VERS') : '',
+    form: gedc ? kidValue(gedc, 'FORM') : '',
+    charset: kidValue(rec, 'CHAR'),
+    file: kidValue(rec, 'FILE'),
+    submitter: kidValue(rec, 'SUBM'),
+    language: kidValue(rec, 'LANG'),
+  };
+}
+
+function parseIndividual(rec, id) {
+  const p = {
+    id, kind: 'INDI', line: rec.line,
+    names: kids(rec, 'NAME').map(parseName),
+    sex: (kidValue(rec, 'SEX').trim().charAt(0).toUpperCase() || 'U'),
+    events: [], attributes: [],
+    famc: kids(rec, 'FAMC').filter((n) => isPointer(n.value)).map((n) => n.value.trim()),
+    fams: kids(rec, 'FAMS').filter((n) => isPointer(n.value)).map((n) => n.value.trim()),
+    notes: collectNotes(rec),
+    sourceRefs: kids(rec, 'SOUR').filter((s) => isPointer(s.value)).map((s) => s.value.trim()),
+    objectRefs: kids(rec, 'OBJE').filter((o) => isPointer(o.value)).map((o) => o.value.trim()),
+    changed: kidValue(kid(rec, 'CHAN'), 'DATE'),
+    // Filled in by linkModel
+    parentFamilies: [], spouseFamilies: [],
+  };
+  if (p.sex !== 'M' && p.sex !== 'F') p.sex = 'U';
+
+  for (const c of rec.children) {
+    if (INDI_EVENT_TAGS[c.tag]) p.events.push(parseEvent(c, INDI_EVENT_TAGS[c.tag]));
+    else if (INDI_ATTR_TAGS[c.tag]) p.attributes.push(parseEvent(c, INDI_ATTR_TAGS[c.tag]));
+    else if (EXT_EVENT_TAGS[c.tag]) p.events.push(parseEvent(c, EXT_EVENT_TAGS[c.tag]));
+    // MARR under INDI is not 5.5.1, but Ancestry emits it; keep it visible.
+    else if (FAM_EVENT_TAGS[c.tag] && !INDI_EVENT_TAGS[c.tag]) {
+      const ev = parseEvent(c, FAM_EVENT_TAGS[c.tag]);
+      ev.misplaced = true;
+      p.events.push(ev);
+    }
+  }
+
+  p.name = p.names[0] || { full: '(unknown)', given: '', surname: '', suffix: '', prefix: '', nickname: '' };
+  p.birth = firstEvent(p.events, ['BIRT', 'CHR', 'BAPM']);
+  p.death = firstEvent(p.events, ['DEAT', 'BURI', 'CREM', 'PROB']);
+  p.birthYear = p.birth ? p.birth.date.year : null;
+  p.deathYear = p.death ? p.death.date.year : null;
+  p.lifespan = lifespan(p);
+  return p;
+}
+
+function firstEvent(events, tags) {
+  for (const t of tags) {
+    const e = events.find((x) => x.tag === t && (x.date.year !== null || x.place || x.asserted));
+    if (e) return e;
+  }
+  return null;
+}
+
+function lifespan(p) {
+  const b = p.birthYear, d = p.deathYear;
+  const approx = (ev) => (ev && /^(about|estimated|calculated|before|after|between|from-to)$/.test(ev.date.qualifier) ? 'c.' : '');
+  if (b !== null && d !== null) return approx(p.birth) + b + '–' + approx(p.death) + d;
+  if (b !== null) return 'b. ' + approx(p.birth) + b;
+  if (d !== null) return 'd. ' + approx(p.death) + d;
+  if (p.death) return 'deceased';
+  return '';
+}
+
+function parseFamily(rec, id) {
+  const f = {
+    id, kind: 'FAM', line: rec.line,
+    husband: (kid(rec, 'HUSB') || {}).value || null,
+    wife: (kid(rec, 'WIFE') || {}).value || null,
+    children: kids(rec, 'CHIL').filter((c) => isPointer(c.value)).map((c) => c.value.trim()),
+    // Relationship qualifiers Ancestry hangs off CHIL (adopted, step, foster).
+    childRelations: {},
+    events: [], notes: collectNotes(rec),
+    sourceRefs: kids(rec, 'SOUR').filter((s) => isPointer(s.value)).map((s) => s.value.trim()),
+    objectRefs: kids(rec, 'OBJE').filter((o) => isPointer(o.value)).map((o) => o.value.trim()),
+    spouses: [], childRefs: [],
+  };
+  if (f.husband && !isPointer(f.husband)) f.husband = null;
+  if (f.wife && !isPointer(f.wife)) f.wife = null;
+  if (f.husband) f.husband = f.husband.trim();
+  if (f.wife) f.wife = f.wife.trim();
+
+  for (const c of kids(rec, 'CHIL')) {
+    const rel = kidValue(c, '_FREL') || kidValue(c, '_MREL') || kidValue(c, 'PEDI');
+    if (rel && isPointer(c.value)) f.childRelations[c.value.trim()] = rel;
+  }
+  for (const c of rec.children) {
+    if (FAM_EVENT_TAGS[c.tag]) f.events.push(parseEvent(c, FAM_EVENT_TAGS[c.tag]));
+  }
+  f.marriage = f.events.find((e) => e.tag === 'MARR') ||
+    f.events.find((e) => ['MARB', 'MARC', 'MARL', 'MARS', 'ENGA'].includes(e.tag)) || null;
+  f.divorce = f.events.find((e) => e.tag === 'DIV' || e.tag === 'ANUL') || null;
+  f.marriageYear = f.marriage ? f.marriage.date.year : null;
+  return f;
+}
+
+// Resolves every pointer to an object, and repairs one-sided links so a family
+// drawn from either end shows the same people. Every repair is recorded, since
+// a link recorded from only one end is a specification violation the validator
+// should report rather than quietly paper over.
+function linkModel(individuals, families) {
+  const repairs = [];
+  for (const f of families.values()) {
+    f.husbandRef = f.husband ? individuals.get(f.husband) || null : null;
+    f.wifeRef = f.wife ? individuals.get(f.wife) || null : null;
+    f.spouses = [f.husbandRef, f.wifeRef].filter(Boolean);
+    f.childRefs = f.children.map((c) => individuals.get(c)).filter(Boolean);
+    f.danglingSpouses = [f.husband, f.wife].filter((x) => x && !individuals.has(x));
+    f.danglingChildren = f.children.filter((c) => !individuals.has(c));
+
+    for (const s of f.spouses) {
+      if (!s.fams.includes(f.id)) {
+        s.fams.push(f.id);
+        repairs.push({ kind: 'missingFams', individual: s.id, family: f.id, line: s.line });
+      }
+    }
+    for (const c of f.childRefs) {
+      if (!c.famc.includes(f.id)) {
+        c.famc.push(f.id);
+        repairs.push({ kind: 'missingFamc', individual: c.id, family: f.id, line: c.line });
+      }
+    }
+  }
+  for (const p of individuals.values()) {
+    for (const fid of p.fams) {
+      const f = families.get(fid);
+      if (!f) continue;
+      if (f.husband !== p.id && f.wife !== p.id) {
+        // FAMS with no matching HUSB/WIFE — attach on the free side. A slot
+        // holding a pointer to a record that does not exist counts as free;
+        // the broken pointer is already recorded in f.danglingSpouses.
+        if (p.sex === 'F' && !f.wifeRef) { f.wife = p.id; f.wifeRef = p; }
+        else if (!f.husbandRef) { f.husband = p.id; f.husbandRef = p; }
+        else if (!f.wifeRef) { f.wife = p.id; f.wifeRef = p; }
+        else continue;
+        f.spouses = [f.husbandRef, f.wifeRef].filter(Boolean);
+        repairs.push({ kind: 'missingSpouse', individual: p.id, family: f.id, line: f.line });
+      }
+    }
+    for (const fid of p.famc) {
+      const f = families.get(fid);
+      if (f && !f.children.includes(p.id)) {
+        f.children.push(p.id);
+        f.childRefs.push(p);
+        repairs.push({ kind: 'missingChil', individual: p.id, family: f.id, line: f.line });
+      }
+    }
+  }
+  for (const p of individuals.values()) {
+    p.parentFamilies = p.famc.map((id) => families.get(id)).filter(Boolean);
+    p.spouseFamilies = p.fams.map((id) => families.get(id)).filter(Boolean);
+    p.parents = [];
+    for (const f of p.parentFamilies) for (const s of f.spouses) if (!p.parents.includes(s)) p.parents.push(s);
+    p.childrenRefs = [];
+    for (const f of p.spouseFamilies) for (const c of f.childRefs) if (!p.childrenRefs.includes(c)) p.childrenRefs.push(c);
+    p.spouseRefs = [];
+    for (const f of p.spouseFamilies) for (const s of f.spouses) if (s !== p && !p.spouseRefs.includes(s)) p.spouseRefs.push(s);
+    p.siblings = [];
+    for (const f of p.parentFamilies) for (const c of f.childRefs) if (c !== p && !p.siblings.includes(c)) p.siblings.push(c);
+  }
+  return repairs;
+}
+
+// ---- Entry point ------------------------------------------------------------
+
+function parseGedcom(text) {
+  const { lines, problems, blankLines } = tokenizeGedcom(text);
+  const { records, problems: structural } = buildRecords(lines);
+  const model = buildModel(records);
+  return {
+    ...model,
+    records, lines,
+    syntaxProblems: problems,
+    structuralProblems: structural,
+    blankLines,
+  };
+}
+// Validates a parsed GEDCOM against the 5.5.1 lineage-linked specification,
+// then against the softer question of whether the data makes sense.
+//
+// Findings are grouped: one entry per rule, with a count and a few samples, so
+// a file with 446 lowercase month names produces one line in the report rather
+// than 446.
+
+
+const ERROR = 'error', WARN = 'warning', INFO = 'info';
+
+// ---- 5.5.1 substructure tables ---------------------------------------------
+// Only the contexts worth policing: the ones where non-conforming exporters
+// actually put things the spec does not allow.
+
+const RECORD_TAGS = ['HEAD', 'SUBM', 'SUBN', 'INDI', 'FAM', 'SOUR', 'REPO', 'OBJE', 'NOTE', 'TRLR'];
+
+const INDI_EVENTS = ['BIRT', 'CHR', 'DEAT', 'BURI', 'CREM', 'ADOP', 'BAPM', 'BARM', 'BASM',
+  'BLES', 'CHRA', 'CONF', 'FCOM', 'ORDN', 'NATU', 'EMIG', 'IMMI', 'CENS', 'PROB', 'WILL',
+  'GRAD', 'RETI', 'EVEN'];
+const INDI_ATTRS = ['CAST', 'DSCR', 'EDUC', 'IDNO', 'NATI', 'NCHI', 'NMR', 'OCCU', 'PROP',
+  'RELI', 'RESI', 'SSN', 'TITL', 'FACT'];
+const FAM_EVENTS = ['ANUL', 'CENS', 'DIV', 'DIVF', 'ENGA', 'MARB', 'MARC', 'MARR', 'MARL',
+  'MARS', 'RESI', 'EVEN'];
+
+const PERMITTED = {
+  HEAD: ['SOUR', 'DEST', 'DATE', 'SUBM', 'SUBN', 'FILE', 'COPR', 'GEDC', 'CHAR', 'LANG', 'PLAC', 'NOTE'],
+  INDI: ['RESN', 'NAME', 'SEX', ...INDI_EVENTS, ...INDI_ATTRS, 'BAPL', 'CONL', 'ENDL', 'SLGC',
+    'FAMC', 'FAMS', 'SUBM', 'ASSO', 'ALIA', 'ANCI', 'DESI', 'RFN', 'AFN', 'REFN', 'RIN',
+    'CHAN', 'NOTE', 'SOUR', 'OBJE'],
+  FAM: ['RESN', ...FAM_EVENTS, 'HUSB', 'WIFE', 'CHIL', 'NCHI', 'SUBM', 'SLGS', 'REFN', 'RIN',
+    'CHAN', 'NOTE', 'SOUR', 'OBJE'],
+  SOUR: ['DATA', 'AUTH', 'TITL', 'ABBR', 'PUBL', 'TEXT', 'REPO', 'REFN', 'RIN', 'CHAN', 'NOTE', 'OBJE'],
+  OBJE: ['FILE', 'REFN', 'RIN', 'NOTE', 'SOUR', 'CHAN'],
+  REPO: ['NAME', 'ADDR', 'PHON', 'EMAIL', 'FAX', 'WWW', 'NOTE', 'REFN', 'RIN', 'CHAN'],
+  SUBM: ['NAME', 'ADDR', 'PHON', 'EMAIL', 'FAX', 'WWW', 'OBJE', 'LANG', 'RFN', 'RIN', 'NOTE', 'CHAN'],
+};
+
+// EVENT_DETAIL, shared by individual and family events (5.5.1 p.32).
+const EVENT_DETAIL = ['TYPE', 'DATE', 'PLAC', 'ADDR', 'PHON', 'EMAIL', 'FAX', 'WWW', 'AGNC',
+  'RELI', 'CAUS', 'RESN', 'AGE', 'HUSB', 'WIFE', 'NOTE', 'SOUR', 'OBJE'];
+const NAME_DETAIL = ['TYPE', 'NPFX', 'GIVN', 'NICK', 'SPFX', 'SURN', 'NSFX', 'FONE', 'ROMN', 'NOTE', 'SOUR'];
+
+const isCustom = (tag) => tag.startsWith('_');
+
+// ---- Report plumbing --------------------------------------------------------
+
+class Report {
+  constructor() { this.groups = new Map(); this.checks = 0; }
+
+  add(id, severity, category, title, detail, sample) {
+    let g = this.groups.get(id);
+    if (!g) {
+      g = { id, severity, category, title, detail, count: 0, samples: [] };
+      this.groups.set(id, g);
+    }
+    g.count++;
+    if (sample && g.samples.length < 6) g.samples.push(sample);
+    return g;
+  }
+
+  finish(counts) {
+    const findings = [...this.groups.values()];
+    const order = { error: 0, warning: 1, info: 2 };
+    findings.sort((a, b) => order[a.severity] - order[b.severity] || b.count - a.count);
+    return {
+      findings,
+      counts,
+      errors: findings.filter((f) => f.severity === ERROR).reduce((s, f) => s + f.count, 0),
+      warnings: findings.filter((f) => f.severity === WARN).reduce((s, f) => s + f.count, 0),
+      infos: findings.filter((f) => f.severity === INFO).reduce((s, f) => s + f.count, 0),
+      errorRules: findings.filter((f) => f.severity === ERROR).length,
+      warningRules: findings.filter((f) => f.severity === WARN).length,
+      checks: this.checks,
+    };
+  }
+}
+
+const at = (line, text) => ({ line, text: String(text == null ? '' : text).slice(0, 110) });
+
+// ---- The validator ----------------------------------------------------------
+
+function validateGedcom(parsed) {
+  const r = new Report();
+  const { records, lines, syntaxProblems, structuralProblems, individuals, families, header } = parsed;
+
+  checkSyntax(r, lines, syntaxProblems, structuralProblems);
+  checkHeaderAndTrailer(r, records, header);
+  const defined = checkRecordsAndXrefs(r, records);
+  checkGrammar(r, records);
+  checkPointers(r, records, defined);
+  checkMultimedia(r, records);
+  checkIndividuals(r, individuals);
+  checkFamilies(r, families);
+  checkRepairs(r, parsed.repairs || []);
+  checkPlausibility(r, individuals, families);
+
+  return r.finish({
+    lines: lines.length,
+    records: records.length,
+    individuals: individuals.size,
+    families: families.size,
+    sources: parsed.sources.size,
+    objects: parsed.objects.size,
+  });
+}
+
+// -- syntax -------------------------------------------------------------------
+
+function checkSyntax(r, lines, syntaxProblems, structuralProblems) {
+  r.checks += 5;
+  for (const p of syntaxProblems) {
+    r.add('syntax.unreadable', ERROR, 'Syntax',
+      'Line does not match the GEDCOM line grammar',
+      'Every line must be `level [xref] tag [value]` (5.5.1 §Grammar). These could not be read and were skipped.',
+      at(p.line, p.text));
+  }
+  for (const p of structuralProblems) {
+    r.add('syntax.orphan', ERROR, 'Syntax',
+      'Line nested under a level that does not exist',
+      'A line at level N must follow a line at level N-1.',
+      at(p.line, p.tag + ' at level ' + p.level));
+  }
+
+  let prev = -1;
+  for (const l of lines) {
+    if (l.level > prev + 1) {
+      r.add('syntax.levelJump', ERROR, 'Syntax',
+        'Level increases by more than one',
+        'Levels may only increase one at a time (5.5.1 §Grammar).',
+        at(l.no, l.level + ' ' + l.tag));
+    }
+    prev = l.level;
+
+    if (l.length > 255) {
+      r.add('syntax.lineLength', WARN, 'Syntax',
+        'Line longer than 255 characters',
+        'GEDCOM 5.5.1 limits a physical line to 255 characters; longer text should be split with CONC/CONT.',
+        at(l.no, l.tag + ' (' + l.length + ' chars)'));
+    }
+    if (l.xref && l.xref.length > 22) {
+      r.add('syntax.xrefLength', WARN, 'Syntax',
+        'Cross-reference identifier longer than 22 characters',
+        'XREF_ID is limited to 22 characters including the delimiting @ signs (5.5.1 p.24).',
+        at(l.no, l.xref));
+    }
+    if (/^[ \t]|[ \t]$/.test(l.value) && l.value.trim() !== '') {
+      r.add('syntax.padding', WARN, 'Values',
+        'Value has leading or trailing whitespace',
+        'Line values are taken verbatim, so padding ends up in the data. Trim on export.',
+        at(l.no, l.tag + ' ' + JSON.stringify(l.value)));
+    }
+  }
+}
+
+function checkHeaderAndTrailer(r, records, header) {
+  r.checks += 6;
+  const first = records[0], last = records[records.length - 1];
+  if (!first || first.tag !== 'HEAD') {
+    r.add('head.missing', ERROR, 'Structure', 'File does not start with a HEAD record',
+      'A lineage-linked file must begin with HEAD and end with TRLR (5.5.1 p.23).', at(1, ''));
+  }
+  if (!last || last.tag !== 'TRLR') {
+    r.add('trlr.missing', ERROR, 'Structure', 'File does not end with a TRLR record',
+      'A lineage-linked file must end with a TRLR record (5.5.1 p.23).', at(last ? last.line : 1, ''));
+  }
+  if (records.filter((x) => x.tag === 'TRLR').length > 1) {
+    r.add('trlr.duplicate', ERROR, 'Structure', 'More than one TRLR record', 'TRLR must appear exactly once.', at(0, ''));
+  }
+  if (!header) return;
+  if (!header.source) {
+    r.add('head.sour', ERROR, 'Structure', 'HEAD is missing the required SOUR line',
+      'HEAD.SOUR (the originating system) is mandatory in 5.5.1.', at(1, ''));
+  }
+  if (!header.version || !header.form) {
+    r.add('head.gedc', ERROR, 'Structure', 'HEAD is missing GEDC.VERS or GEDC.FORM',
+      'Both are mandatory inside HEAD.GEDC.', at(1, 'VERS=' + header.version + ' FORM=' + header.form));
+  } else {
+    if (header.version !== '5.5.1' && header.version !== '5.5') {
+      r.add('head.version', INFO, 'Structure', 'GEDCOM version is not 5.5 or 5.5.1',
+        'This validator checks against 5.5.1; results for other versions are indicative.',
+        at(1, header.version));
+    }
+    if (header.form.toUpperCase() !== 'LINEAGE-LINKED') {
+      r.add('head.form', ERROR, 'Structure', 'HEAD.GEDC.FORM is not LINEAGE-LINKED',
+        'Only the LINEAGE-LINKED form is defined by the specification.', at(1, header.form));
+    }
+  }
+  const charsets = ['ANSEL', 'UTF-8', 'UNICODE', 'ASCII'];
+  if (!header.charset) {
+    r.add('head.char', ERROR, 'Structure', 'HEAD is missing the required CHAR line',
+      'HEAD.CHAR (character set) is mandatory in 5.5.1.', at(1, ''));
+  } else if (!charsets.includes(header.charset.toUpperCase())) {
+    r.add('head.charValue', WARN, 'Structure', 'HEAD.CHAR is not one of the values 5.5.1 defines',
+      'Permitted values are ANSEL, UTF-8, UNICODE and ASCII.', at(1, header.charset));
+  }
+  if (!header.file) {
+    r.add('head.file', INFO, 'Structure', 'HEAD has no FILE line',
+      'FILE (the name the file was known by) is optional but recommended.', at(1, ''));
+  }
+}
+
+function checkRecordsAndXrefs(r, records) {
+  r.checks += 4;
+  const defined = new Map();
+  for (const rec of records) {
+    if (!RECORD_TAGS.includes(rec.tag) && !isCustom(rec.tag)) {
+      r.add('record.unknown', ERROR, 'Structure', 'Record type not defined at level 0 in 5.5.1',
+        'Level 0 may hold HEAD, SUBM, SUBN, INDI, FAM, SOUR, REPO, OBJE, NOTE and TRLR.',
+        at(rec.line, rec.tag));
+    } else if (isCustom(rec.tag)) {
+      r.add('record.custom', INFO, 'Extensions', 'Vendor-defined record type at level 0',
+        'Underscore-prefixed tags are the specification’s escape hatch for vendor data (5.5.1 p.10). Other programs may ignore them.',
+        at(rec.line, rec.tag));
+    }
+    if (rec.xref) {
+      if (defined.has(rec.xref)) {
+        r.add('xref.duplicate', ERROR, 'References', 'Cross-reference identifier defined twice',
+          'Each XREF_ID must be unique within the file.', at(rec.line, rec.xref));
+      }
+      defined.set(rec.xref, rec.tag);
+    } else if (['INDI', 'FAM', 'SOUR', 'REPO', 'OBJE', 'SUBM'].includes(rec.tag)) {
+      r.add('xref.missing', ERROR, 'References', 'Record has no cross-reference identifier',
+        'INDI, FAM, SOUR, REPO, OBJE and SUBM records must each carry an XREF_ID so they can be pointed at.',
+        at(rec.line, rec.tag));
+    }
+  }
+  return defined;
+}
+
+// -- grammar (tag placement) --------------------------------------------------
+
+function checkGrammar(r, records) {
+  r.checks += 3;
+  for (const rec of records) {
+    const permitted = PERMITTED[rec.tag];
+    if (!permitted) continue;
+    for (const c of rec.children) {
+      if (isCustom(c.tag)) {
+        r.add('tag.custom', INFO, 'Extensions', 'Vendor-defined tag',
+          'Underscore-prefixed tags are permitted but not portable; other software will usually drop them.',
+          at(c.line, rec.tag + '.' + c.tag));
+        continue;
+      }
+      if (!permitted.includes(c.tag)) {
+        r.add('tag.misplaced.' + rec.tag + '.' + c.tag, ERROR, 'Grammar',
+          `${c.tag} is not a permitted substructure of ${rec.tag}`,
+          grammarHint(rec.tag, c.tag),
+          at(c.line, rec.tag + '.' + c.tag + ' ' + c.value));
+      }
+      checkEventDetail(r, rec.tag, c);
+    }
+  }
+}
+
+function grammarHint(parent, tag) {
+  if (parent === 'INDI' && FAM_EVENTS.includes(tag)) {
+    return `${tag} is a family event in 5.5.1 and belongs on the FAM record, not the individual. ` +
+      'Some exporters duplicate it here; portable readers will ignore it.';
+  }
+  if (parent === 'INDI' && tag === 'ADDR') {
+    return 'ADDR is part of an ADDRESS_STRUCTURE attached to an event or attribute (for example RESI), ' +
+      'not a direct substructure of INDI.';
+  }
+  return `The 5.5.1 record structure for ${parent} does not list ${tag}. Readers are free to discard it.`;
+}
+
+function checkEventDetail(r, recordTag, node) {
+  const isEvent = (recordTag === 'INDI' && (INDI_EVENTS.includes(node.tag) || INDI_ATTRS.includes(node.tag))) ||
+    (recordTag === 'FAM' && FAM_EVENTS.includes(node.tag));
+  const permitted = node.tag === 'NAME' ? NAME_DETAIL : isEvent ? EVENT_DETAIL : null;
+  if (!permitted) return;
+  for (const c of node.children) {
+    if (isCustom(c.tag)) continue; // already reported at the record level
+    if (!permitted.includes(c.tag)) {
+      r.add('detail.misplaced.' + node.tag + '.' + c.tag, WARN, 'Grammar',
+        `${c.tag} is not part of ${node.tag === 'NAME' ? 'PERSONAL_NAME_STRUCTURE' : 'EVENT_DETAIL'}`,
+        `${recordTag}.${node.tag}.${c.tag} is outside what 5.5.1 defines here.`,
+        at(c.line, recordTag + '.' + node.tag + '.' + c.tag));
+    }
+  }
+  if (node.tag === 'EVEN' && !node.children.some((c) => c.tag === 'TYPE')) {
+    r.add('even.type', WARN, 'Grammar', 'EVEN without a TYPE',
+      'A generic EVEN carries no meaning without TYPE naming the event (5.5.1 p.33).', at(node.line, recordTag + '.EVEN'));
+  }
+  if (node.tag === 'OCCU' && !node.value.trim()) {
+    r.add('occu.empty', WARN, 'Values', 'OCCU has no value',
+      'The occupation belongs in the OCCU line value. An empty OCCU with the trade written into PLAC loses it for other readers.',
+      at(node.line, recordTag + '.OCCU'));
+  }
+}
+
+// -- pointers -----------------------------------------------------------------
+
+function checkPointers(r, records, defined) {
+  r.checks += 2;
+  const referenced = new Set();
+  (function walk(nodes, path) {
+    for (const n of nodes) {
+      const p = path ? path + '.' + n.tag : n.tag;
+      const v = (n.value || '').trim();
+      if (isPointer(v)) {
+        referenced.add(v);
+        if (!defined.has(v)) {
+          r.add('pointer.dangling', ERROR, 'References', 'Pointer to a record that does not exist',
+            'Every pointer must name a record defined in the same file (5.5.1 p.11). The link cannot be followed.',
+            at(n.line, p + ' ' + v));
+        }
+      }
+      walk(n.children, p);
+    }
+  })(records, '');
+
+  for (const rec of records) {
+    if (!rec.xref || !['SOUR', 'OBJE', 'REPO', 'NOTE', 'SUBM'].includes(rec.tag)) continue;
+    if (!referenced.has(rec.xref)) {
+      r.add('record.unreferenced', INFO, 'References', 'Record is never pointed at',
+        'A supporting record nothing refers to is dead weight in the file.',
+        at(rec.line, rec.tag + ' ' + rec.xref));
+    }
+  }
+  return referenced;
+}
+
+// -- multimedia ---------------------------------------------------------------
+
+function checkMultimedia(r, records) {
+  r.checks += 3;
+  for (const rec of records) {
+    if (rec.tag !== 'OBJE') continue;
+    const files = rec.children.filter((c) => c.tag === 'FILE');
+    if (!files.length) {
+      r.add('obje.noFile', ERROR, 'Multimedia', 'Multimedia record has no FILE',
+        'MULTIMEDIA_RECORD requires at least one FILE giving the multimedia reference (5.5.1 p.26).',
+        at(rec.line, rec.xref || 'OBJE'));
+      continue;
+    }
+    for (const f of files) {
+      if (!f.value.trim()) {
+        r.add('obje.emptyFile', ERROR, 'Multimedia', 'FILE has no multimedia reference',
+          'The FILE line value carries the path or URL of the image. Empty here, so the record ' +
+          'names a format and a title but no actual file — the pictures are not in this export.',
+          at(f.line, (rec.xref || 'OBJE') + ' FILE'));
+      }
+      if (!f.children.some((c) => c.tag === 'FORM')) {
+        r.add('obje.noForm', ERROR, 'Multimedia', 'FILE has no FORM',
+          'FORM (the multimedia format) is mandatory beneath FILE in 5.5.1.',
+          at(f.line, (rec.xref || 'OBJE') + ' FILE'));
+      }
+    }
+  }
+}
+
+// -- one-sided links the parser had to repair ---------------------------------
+
+const REPAIR_RULES = {
+  missingFams: ['FAMS', 'HUSB/WIFE', 'A family names this individual as a spouse, but the individual has no matching FAMS link.'],
+  missingFamc: ['FAMC', 'CHIL', 'A family names this individual as a child, but the individual has no matching FAMC link.'],
+  missingSpouse: ['HUSB or WIFE', 'FAMS', 'An individual points at this family with FAMS, but the family does not name them as HUSB or WIFE.'],
+  missingChil: ['CHIL', 'FAMC', 'An individual points at this family with FAMC, but the family does not list them as a CHIL.'],
+};
+
+function checkRepairs(r, repairs) {
+  r.checks += 1;
+  for (const rep of repairs) {
+    const rule = REPAIR_RULES[rep.kind];
+    if (!rule) continue;
+    r.add('link.oneSided.' + rep.kind, ERROR, 'References',
+      `Missing ${rule[0]} to match a ${rule[1]} link`,
+      rule[2] + ' Links must be recorded from both ends (5.5.1 p.26, p.31). ' +
+      'The viewer has joined the two sides so the family still draws.',
+      at(rep.line, rep.individual + ' ↔ ' + rep.family));
+  }
+}
+
+// -- individuals --------------------------------------------------------------
+
+function checkIndividuals(r, individuals) {
+  r.checks += 8;
+  for (const p of individuals.values()) {
+    if (!p.names.length) {
+      r.add('indi.noName', WARN, 'Individuals', 'Individual has no NAME',
+        'NAME is not strictly mandatory, but an individual without one cannot be identified.', at(p.line, p.id));
+    }
+    for (const n of p.names) {
+      if (!n.hasSlashes) {
+        r.add('name.noSlashes', WARN, 'Individuals', 'NAME value has no /surname/ delimiters',
+          'The name value should be "Given /Surname/ Suffix" so the surname can be told apart (5.5.1 p.54).',
+          at(p.line, p.id + ': ' + n.raw));
+      }
+    }
+    if (p.names.length > 1) {
+      r.add('name.multiple', INFO, 'Individuals', 'Individual has more than one NAME',
+        'Permitted — alternate spellings, married names — but only the first is used as the display name here. ' +
+        'Adding TYPE to the extra names says what they are.',
+        at(p.line, p.id + ': ' + p.names.map((n) => n.raw).join(' | ')));
+    }
+    if (p.sex === 'U') {
+      r.add('indi.noSex', INFO, 'Individuals', 'Individual has no usable SEX',
+        'SEX is optional, but without it the individual cannot be placed as husband or wife.', at(p.line, p.id));
+    }
+    if (p.famc.length > 1) {
+      r.add('indi.multiFamc', INFO, 'Individuals', 'Individual is a child in more than one family',
+        'Legitimate for adoption or fostering; PEDI on the FAMC link records which is which.',
+        at(p.line, p.id + ' → ' + p.famc.join(' ')));
+    }
+    for (const ev of [...p.events, ...p.attributes]) checkEventValues(r, ev, p.id);
+    if (p.events.some((e) => e.misplaced)) {
+      // already reported by the grammar check; nothing further
+    }
+  }
+}
+
+function checkEventValues(r, ev, ownerId) {
+  if (ev.date.raw && !ev.date.conforming) {
+    const why = describeDateProblem(ev.date.raw);
+    r.add('date.' + why.id, why.severity, 'Dates', why.title, why.detail,
+      at(ev.line, ownerId + ' ' + ev.tag + ' DATE ' + ev.date.raw));
+  }
+  if (ev.date.raw && !ev.date.parsed && ev.date.conforming === false && !/^\(.*\)$/.test(ev.date.raw)) {
+    r.add('date.unreadable', WARN, 'Dates', 'Date could not be read as a date at all',
+      'Nothing resembling a day, month or year could be extracted, so the event cannot be placed in time.',
+      at(ev.line, ownerId + ' ' + ev.tag + ' DATE ' + ev.date.raw));
+  }
+}
+
+function describeDateProblem(raw) {
+  const s = raw.trim();
+  if (/^\d{4}\s*[-–]\s*\d{4}$/.test(s)) {
+    return {
+      id: 'range', severity: ERROR, title: 'Date range written with a hyphen',
+      detail: 'A period is written `FROM 1914 TO 1920` and a range `BET 1914 AND 1920` (5.5.1 p.45). ' +
+        '"1914-1920" is not a DATE_VALUE and most readers will store it as text.',
+    };
+  }
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+    return {
+      id: 'slashes', severity: ERROR, title: 'Date written in numeric d/m/y form',
+      detail: 'GEDCOM dates are `DD MMM YYYY` with a three-letter English month (5.5.1 p.45). ' +
+        'A numeric form is ambiguous between day-first and month-first readers.',
+    };
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    return {
+      id: 'iso', severity: WARN, title: 'Date written in ISO 8601 form',
+      detail: 'Unambiguous but not a GEDCOM DATE_VALUE; 5.5.1 expects `DD MMM YYYY`.',
+    };
+  }
+  if (/\b(JANUARY|FEBRUARY|MARCH|APRIL|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/i.test(s)) {
+    return {
+      id: 'fullMonth', severity: WARN, title: 'Date uses a full month name',
+      detail: 'The month must be the three-letter abbreviation JAN–DEC (5.5.1 p.45).',
+    };
+  }
+  if (/^(ABT\.|ABOUT|CIRCA|CA\.?|C\.)\s/i.test(s)) {
+    return {
+      id: 'approxWord', severity: WARN, title: 'Approximation keyword is not the GEDCOM one',
+      detail: 'The defined keywords are ABT, CAL and EST — without a full stop (5.5.1 p.46).',
+    };
+  }
+  if (/^\d{1,2}\s+[A-Za-z]{3}\.?\s+\d{3,4}$/.test(s) || /[a-z]/.test(s)) {
+    return {
+      id: 'case', severity: INFO, title: 'Date keyword or month is not upper case',
+      detail: 'The specification writes months and keywords in upper case. Readers generally cope, ' +
+        'but it is not the defined form.',
+    };
+  }
+  return {
+    id: 'other', severity: WARN, title: 'Date does not match DATE_VALUE',
+    detail: 'The value is not one of the forms defined in 5.5.1 p.45–46 and will be treated as free text.',
+  };
+}
+
+// -- families -----------------------------------------------------------------
+
+function checkFamilies(r, families) {
+  r.checks += 6;
+  for (const f of families.values()) {
+    const members = f.spouses.length + f.childRefs.length;
+    if (!members) {
+      r.add('fam.empty', WARN, 'Families', 'Family record with no members',
+        'A FAM with no HUSB, WIFE or CHIL links nothing together.', at(f.line, f.id));
+    } else if (members === 1) {
+      r.add('fam.lone', WARN, 'Families', 'Family record with only one member that exists',
+        'A family joins people together; with a single resolvable member there is no relationship ' +
+        'to record and nothing to draw. Usually the other side is a pointer to a record ' +
+        'that is not in the file.',
+        at(f.line, f.id + (f.danglingSpouses.length || f.danglingChildren.length
+          ? ' — broken link to ' + [...f.danglingSpouses, ...f.danglingChildren].join(', ') : '')));
+    }
+    if (f.husbandRef && f.husbandRef.sex === 'F') {
+      r.add('fam.sexMismatch', WARN, 'Families', 'HUSB points at an individual recorded as female',
+        'HUSB and WIFE are defined by SEX in 5.5.1; the pairing here contradicts the individual record.',
+        at(f.line, f.id + ' HUSB ' + f.husband));
+    }
+    if (f.wifeRef && f.wifeRef.sex === 'M') {
+      r.add('fam.sexMismatch', WARN, 'Families', 'WIFE points at an individual recorded as male',
+        'HUSB and WIFE are defined by SEX in 5.5.1; the pairing here contradicts the individual record.',
+        at(f.line, f.id + ' WIFE ' + f.wife));
+    }
+    for (const c of f.childRefs) {
+      if (c === f.husbandRef || c === f.wifeRef) {
+        r.add('fam.selfChild', ERROR, 'Families', 'Individual is both spouse and child in the same family',
+          'This makes the person their own parent.', at(f.line, f.id + ' ' + c.id));
+      }
+    }
+    const seen = new Set();
+    for (const c of f.children) {
+      if (seen.has(c)) {
+        r.add('fam.dupChild', WARN, 'Families', 'The same child is listed twice in one family',
+          'Duplicate CHIL pointers inflate sibling counts.', at(f.line, f.id + ' ' + c));
+      }
+      seen.add(c);
+    }
+  }
+}
+
+// -- plausibility -------------------------------------------------------------
+
+function checkPlausibility(r, individuals, families) {
+  r.checks += 7;
+  for (const p of individuals.values()) {
+    const b = p.birthYear, d = p.deathYear;
+    if (b !== null && d !== null) {
+      if (d < b) {
+        r.add('plaus.deathBeforeBirth', ERROR, 'Plausibility', 'Death is before birth',
+          'The dates on this individual cannot both be right.', at(p.line, p.id + ' ' + b + ' → ' + d));
+      } else if (d - b > 115) {
+        r.add('plaus.longLife', WARN, 'Plausibility', 'Lifespan over 115 years',
+          'Possible, but usually a transcription error or two people merged into one.',
+          at(p.line, p.id + ' ' + b + '–' + d + ' (' + (d - b) + ')'));
+      }
+    }
+    for (const parent of p.parents || []) {
+      if (parent.birthYear !== null && b !== null) {
+        const gap = b - parent.birthYear;
+        if (gap < 12) {
+          r.add('plaus.youngParent', WARN, 'Plausibility', 'Parent under 12 at the child’s birth',
+            'Check the generation links and the birth years.',
+            at(p.line, parent.id + ' (' + parent.birthYear + ') → ' + p.id + ' (' + b + ')'));
+        } else if (gap > 65) {
+          r.add('plaus.oldParent', WARN, 'Plausibility', 'Parent over 65 at the child’s birth',
+            'Often a sign that a generation has been skipped or two people share a name.',
+            at(p.line, parent.id + ' (' + parent.birthYear + ') → ' + p.id + ' (' + b + ')'));
+        }
+      }
+      if (parent.deathYear !== null && b !== null && b - parent.deathYear > 1) {
+        r.add('plaus.bornAfterParentDeath', WARN, 'Plausibility', 'Child born more than a year after a parent died',
+          'Allowing one year for a posthumous birth, this pairing does not work.',
+          at(p.line, parent.id + ' d.' + parent.deathYear + ' → ' + p.id + ' b.' + b));
+      }
+    }
+  }
+
+  for (const f of families.values()) {
+    const y = f.marriageYear;
+    if (y === null) continue;
+    for (const s of f.spouses) {
+      if (s.birthYear !== null && y - s.birthYear < 12) {
+        r.add('plaus.youngMarriage', WARN, 'Plausibility', 'Spouse under 12 at marriage',
+          'Check the marriage year against the birth year.', at(f.line, f.id + ' ' + s.id + ' b.' + s.birthYear + ' m.' + y));
+      }
+      if (s.deathYear !== null && y > s.deathYear) {
+        r.add('plaus.marriedAfterDeath', WARN, 'Plausibility', 'Marriage recorded after a spouse died',
+          'One of the two dates is wrong, or the marriage belongs to a different family.',
+          at(f.line, f.id + ' ' + s.id + ' d.' + s.deathYear + ' m.' + y));
+      }
+    }
+  }
+
+  // Ancestry loops make a family tree impossible to lay out.
+  const state = new Map();
+  const loops = [];
+  (function () {
+    const visit = (p, path) => {
+      const st = state.get(p.id);
+      if (st === 2) return;
+      if (st === 1) { loops.push(path.slice(path.indexOf(p.id)).concat(p.id)); return; }
+      state.set(p.id, 1);
+      for (const parent of p.parents || []) visit(parent, path.concat(p.id));
+      state.set(p.id, 2);
+    };
+    for (const p of individuals.values()) visit(p, []);
+  })();
+  for (const loop of loops) {
+    r.add('plaus.ancestryLoop', ERROR, 'Plausibility', 'Individual is their own ancestor',
+      'A cycle in the parent links. No generation ordering exists while it is there.',
+      at(0, loop.join(' → ')));
+  }
+}
+// Lays out a whole lineage-linked graph — not a single descendant tree.
+//
+// A GEDCOM is a graph, not a tree: people remarry, cousins marry each other,
+// and a file usually holds several unconnected families. Walking descendants
+// from one root draws a fraction of it. This does the general thing:
+//
+//   1. every individual gets a generation, by relaxation over the parent links
+//   2. individuals married within a generation are grouped into a cluster, so
+//      couples (and second and third marriages) always sit side by side
+//   3. clusters are ordered per generation by a depth-first walk, then nudged
+//      toward their relatives by barycentre passes with separation constraints
+//   4. disconnected components are laid out one after another
+//
+// The result places every person exactly once and every family link explicitly.
+
+const CARD_W = 152;
+const CARD_H = 62;
+const MATE_GAP = 30;      // between two cards of a couple (the marriage link sits here)
+const CLUSTER_GAP = 46;   // between neighbouring clusters in a row
+const ROW_GAP = 104;      // vertical space between card rows
+const COMPONENT_GAP = 130;
+const ROW_H = CARD_H + ROW_GAP;
+
+// ---- Generations ------------------------------------------------------------
+
+// Monotone relaxation: a child is at least one row below its parents, and
+// spouses share a row. Both rules only ever push a person downwards, so this
+// terminates even on files where a marriage links two different generations.
+function assignGenerations(people, families) {
+  const gen = new Map();
+  for (const p of people) gen.set(p.id, 0);
+
+  const famList = [...families];
+  const limit = Math.max(20, people.length + 4);
+  for (let pass = 0; pass < limit; pass++) {
+    let moved = false;
+    for (const f of famList) {
+      const spouses = f.spouses.filter((s) => gen.has(s.id));
+      let g = 0;
+      for (const s of spouses) g = Math.max(g, gen.get(s.id));
+      for (const s of spouses) if (gen.get(s.id) < g) { gen.set(s.id, g); moved = true; }
+      for (const c of f.childRefs) {
+        if (!gen.has(c.id)) continue;
+        if (gen.get(c.id) < g + 1) { gen.set(c.id, g + 1); moved = true; }
+      }
+    }
+    if (!moved) break;
+  }
+  return gen;
+}
+
+// ---- Components -------------------------------------------------------------
+
+function findComponents(people, families) {
+  const parent = new Map(people.map((p) => [p.id, p.id]));
+  const find = (a) => { while (parent.get(a) !== a) { parent.set(a, parent.get(parent.get(a))); a = parent.get(a); } return a; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+
+  for (const f of families) {
+    const members = [...f.spouses, ...f.childRefs].filter((m) => parent.has(m.id)).map((m) => m.id);
+    for (let i = 1; i < members.length; i++) union(members[0], members[i]);
+  }
+  const groups = new Map();
+  for (const p of people) {
+    const root = find(p.id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(p);
+  }
+  return [...groups.values()];
+}
+
+// ---- Clusters (a run of people married within one generation) ---------------
+
+function buildClusters(people, families, gen) {
+  const inSet = new Set(people.map((p) => p.id));
+  const mates = new Map(people.map((p) => [p.id, new Set()]));
+  for (const f of families) {
+    const s = f.spouses.filter((x) => inSet.has(x.id));
+    for (let i = 0; i < s.length; i++) {
+      for (let j = i + 1; j < s.length; j++) {
+        if (gen.get(s[i].id) !== gen.get(s[j].id)) continue;
+        mates.get(s[i].id).add(s[j].id);
+        mates.get(s[j].id).add(s[i].id);
+      }
+    }
+  }
+
+  const byId = new Map(people.map((p) => [p.id, p]));
+  const seen = new Set();
+  const clusters = [];
+
+  for (const p of people) {
+    if (seen.has(p.id)) continue;
+    // Collect the connected marriage group, then walk it as a chain so the
+    // most-married person ends up with a partner on each side.
+    const group = [];
+    const stack = [p.id];
+    seen.add(p.id);
+    while (stack.length) {
+      const id = stack.pop();
+      group.push(id);
+      for (const m of mates.get(id)) if (!seen.has(m)) { seen.add(m); stack.push(m); }
+    }
+    clusters.push({
+      id: 'C' + clusters.length,
+      gen: gen.get(p.id),
+      members: orderChain(group, mates, byId).map((id) => byId.get(id)),
+      x: 0, seed: 0,
+    });
+  }
+
+  for (const c of clusters) {
+    c.width = c.members.length * CARD_W + (c.members.length - 1) * MATE_GAP;
+    c.index = new Map(c.members.map((m, i) => [m.id, i]));
+  }
+  return clusters;
+}
+
+// Greedy chain through the marriage sub-graph: start at an end (or the least
+// married person), then always step to the neighbour with the fewest options
+// left, which keeps a serial remarrier in the middle of their spouses.
+function orderChain(ids, mates, byId) {
+  if (ids.length <= 1) return ids;
+  const remaining = new Set(ids);
+  const degree = (id) => [...mates.get(id)].filter((m) => remaining.has(m)).length;
+  let start = ids[0];
+  for (const id of ids) {
+    if (degree(id) < degree(start)) start = id;
+    else if (degree(id) === degree(start) && birthKey(byId.get(id)) < birthKey(byId.get(start))) start = id;
+  }
+  const out = [];
+  let cur = start;
+  while (cur) {
+    out.push(cur);
+    remaining.delete(cur);
+    const next = [...mates.get(cur)]
+      .filter((m) => remaining.has(m))
+      .sort((a, b) => degree(a) - degree(b) || birthKey(byId.get(a)) - birthKey(byId.get(b)))[0];
+    cur = next || null;
+  }
+  // Anything unreachable (a marriage group that is not a simple chain) follows.
+  for (const id of ids) if (remaining.has(id)) { out.push(id); remaining.delete(id); }
+  return out;
+}
+
+const birthKey = (p) => (p && p.birthYear !== null && p.birthYear !== undefined ? p.birthYear : 9999);
+
+// ---- Ordering seed ----------------------------------------------------------
+
+// A depth-first walk down the family links, so siblings stay together and a
+// couple's children sit under them before anything else claims the space.
+function seedOrder(clusters, families, gen) {
+  const clusterOf = new Map();
+  for (const c of clusters) for (const m of c.members) clusterOf.set(m.id, c);
+
+  const childFamilies = new Map(); // cluster -> families it is the parent side of
+  for (const f of families) {
+    for (const s of f.spouses) {
+      const c = clusterOf.get(s.id);
+      if (!c) continue;
+      if (!childFamilies.has(c)) childFamilies.set(c, new Set());
+      childFamilies.get(c).add(f);
+    }
+  }
+
+  let counter = 0;
+  const visited = new Set();
+  const walk = (c) => {
+    if (!c || visited.has(c)) return;
+    visited.add(c);
+    c.seed = counter++;
+    const fams = [...(childFamilies.get(c) || [])]
+      .sort((a, b) => (a.marriageYear ?? 9999) - (b.marriageYear ?? 9999));
+    for (const f of fams) {
+      const children = [...f.childRefs].sort((a, b) => birthKey(a) - birthKey(b));
+      for (const ch of children) walk(clusterOf.get(ch));
+    }
+  };
+
+  // Start from the oldest generations so the walk runs downwards.
+  const roots = [...clusters].sort((a, b) =>
+    a.gen - b.gen ||
+    Math.min(...a.members.map(birthKey)) - Math.min(...b.members.map(birthKey)) ||
+    a.members.length - b.members.length);
+  for (const c of roots) walk(c);
+  return clusterOf;
+}
+
+// ---- Horizontal placement ---------------------------------------------------
+
+// Pool-adjacent-violators: the least-squares fit to `v` that is non-decreasing.
+// O(n), and exact — no iteration to tune.
+function isotonic(v) {
+  const blocks = []; // { sum, len }
+  for (let i = 0; i < v.length; i++) {
+    let b = { sum: v[i], len: 1 };
+    while (blocks.length) {
+      const prev = blocks[blocks.length - 1];
+      if (prev.sum / prev.len <= b.sum / b.len) break;
+      blocks.pop();
+      b = { sum: prev.sum + b.sum, len: prev.len + b.len };
+    }
+    blocks.push(b);
+  }
+  const out = [];
+  for (const b of blocks) {
+    const mean = b.sum / b.len;
+    for (let k = 0; k < b.len; k++) out.push(mean);
+  }
+  return out;
+}
+
+// Places one row of clusters as close to `desired` as the ordering and the
+// minimum gap allow. Substituting z[i] = x[i] - offset[i] turns "no overlap,
+// keep the order" into "z must not decrease", so the best placement is the
+// isotonic regression of the desired positions — optimal in one pass, and it
+// compacts slack out of the row instead of only ever pushing rightwards.
+function placeRow(row, desired) {
+  if (!row.length) return;
+  const offsets = new Array(row.length);
+  let acc = 0;
+  for (let i = 0; i < row.length; i++) {
+    offsets[i] = acc;
+    acc += row[i].width + CLUSTER_GAP;
+  }
+  const z = isotonic(row.map((c, i) => (desired ? desired[i] : c.x) - offsets[i]));
+  for (let i = 0; i < row.length; i++) row[i].x = z[i] + offsets[i];
+}
+
+function barycentrePasses(rows, clusters, families, clusterOf, passes) {
+  const parentsOf = new Map(clusters.map((c) => [c, new Set()]));
+  const childrenOf = new Map(clusters.map((c) => [c, new Set()]));
+  for (const f of families) {
+    const parentClusters = new Set(f.spouses.map((s) => clusterOf.get(s.id)).filter(Boolean));
+    const childClusters = new Set(f.childRefs.map((c) => clusterOf.get(c.id)).filter(Boolean));
+    for (const pc of parentClusters) {
+      for (const cc of childClusters) {
+        if (pc === cc) continue;
+        childrenOf.get(pc).add(cc);
+        parentsOf.get(cc).add(pc);
+      }
+    }
+  }
+  const centre = (c) => c.x + c.width / 2;
+  const meanOf = (set) => {
+    if (!set.size) return null;
+    let sum = 0;
+    for (const c of set) sum += centre(c);
+    return sum / set.size;
+  };
+
+  const genList = [...rows.keys()].sort((a, b) => a - b);
+  for (let pass = 0; pass < passes; pass++) {
+    const down = pass % 2 === 0;
+    const order = down ? genList : [...genList].reverse();
+    for (const g of order) {
+      const row = rows.get(g);
+      const desired = row.map((c) => {
+        const m = meanOf(down ? parentsOf.get(c) : childrenOf.get(c));
+        return (m === null ? centre(c) : m) - c.width / 2;
+      });
+      placeRow(row, desired);
+    }
+  }
+}
+
+// ---- Entry point ------------------------------------------------------------
+
+// `individuals` and `families` may be the whole file or any subset; the subset
+// is closed over families automatically (a family is drawn when at least one
+// of its members is in the subset).
+function layoutGraph(individuals, families, options = {}) {
+  const people = [...individuals.values ? individuals.values() : individuals];
+  if (!people.length) return emptyLayout();
+  const inSet = new Set(people.map((p) => p.id));
+  const famList = [...(families.values ? families.values() : families)]
+    .filter((f) => f.spouses.some((s) => inSet.has(s.id)) || f.childRefs.some((c) => inSet.has(c.id)));
+
+  const gen = assignGenerations(people, famList);
+  const components = findComponents(people, famList);
+  // Bigger families first, and singletons last, so the canvas reads left to right.
+  components.sort((a, b) => b.length - a.length || birthKey(a[0]) - birthKey(b[0]));
+
+  const allClusters = [];
+  const allNodes = [];
+  const allFamilyNodes = [];
+  let offsetX = 0;
+
+  for (const comp of components) {
+    const compFams = famList.filter((f) =>
+      [...f.spouses, ...f.childRefs].some((m) => comp.some((p) => p.id === m.id)));
+    const clusters = buildClusters(comp, compFams, gen);
+    const clusterOf = seedOrder(clusters, compFams, gen);
+
+    const rows = new Map();
+    for (const c of clusters) {
+      if (!rows.has(c.gen)) rows.set(c.gen, []);
+      rows.get(c.gen).push(c);
+    }
+    for (const row of rows.values()) {
+      row.sort((a, b) => a.seed - b.seed);
+      let x = 0;
+      for (const c of row) { c.x = x; x += c.width + CLUSTER_GAP; }
+    }
+    barycentrePasses(rows, clusters, compFams, clusterOf, options.passes ?? 8);
+
+    // Normalise this component to start at the running offset.
+    let minX = Infinity, maxX = -Infinity;
+    for (const c of clusters) { minX = Math.min(minX, c.x); maxX = Math.max(maxX, c.x + c.width); }
+    const shift = offsetX - minX;
+    for (const c of clusters) c.x += shift;
+    offsetX += (maxX - minX) + COMPONENT_GAP;
+
+    for (const c of clusters) {
+      allClusters.push(c);
+      c.members.forEach((m, i) => {
+        allNodes.push({
+          person: m,
+          id: m.id,
+          gen: c.gen,
+          x: c.x + i * (CARD_W + MATE_GAP),
+          y: c.gen * ROW_H,
+          w: CARD_W, h: CARD_H,
+          cluster: c,
+        });
+      });
+    }
+    for (const f of compFams) allFamilyNodes.push(f);
+  }
+
+  const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+
+  // Family junctions and the links that hang off them.
+  const familyNodes = [];
+  for (const f of allFamilyNodes) {
+    const spouseNodes = f.spouses.map((s) => nodeById.get(s.id)).filter(Boolean);
+    const childNodes = f.childRefs.map((c) => nodeById.get(c.id)).filter(Boolean);
+
+    // In a focused view a family may have only one member on screen; it then
+    // has no link to draw, so it is not a family of this view.
+    if (spouseNodes.length + childNodes.length < 2) continue;
+
+    const anchorSource = spouseNodes.length ? spouseNodes : childNodes;
+    const jx = anchorSource.reduce((s, n) => s + n.x + n.w / 2, 0) / anchorSource.length;
+    const jy = spouseNodes.length
+      ? Math.max(...spouseNodes.map((n) => n.y)) + CARD_H
+      : Math.min(...childNodes.map((n) => n.y)) - ROW_GAP / 2;
+
+    // Adjacent couple: the marriage link is the short run between the cards.
+    let mate = null;
+    if (spouseNodes.length === 2) {
+      const [a, b] = spouseNodes.slice().sort((p, q) => p.x - q.x);
+      mate = { x1: a.x + a.w, y1: a.y + a.h / 2, x2: b.x, y2: b.y + b.h / 2, adjacent: Math.abs(b.x - (a.x + a.w) - MATE_GAP) < 1 };
+    }
+
+    familyNodes.push({
+      family: f,
+      id: f.id,
+      x: jx,
+      y: jy,
+      spouseNodes,
+      childNodes,
+      mate,
+      // The horizontal sibling bar sits midway between the two rows.
+      barY: childNodes.length ? Math.min(...childNodes.map((n) => n.y)) - ROW_GAP / 2 : jy,
+    });
+  }
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of allNodes) {
+    minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x + n.w);
+    minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y + n.h);
+  }
+
+  const generations = new Map();
+  for (const n of allNodes) generations.set(n.gen, (generations.get(n.gen) || 0) + 1);
+
+  return {
+    nodes: allNodes,
+    nodeById,
+    familyNodes,
+    clusters: allClusters,
+    components: components.length,
+    generations,
+    bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+    metrics: { CARD_W, CARD_H, MATE_GAP, ROW_GAP, ROW_H },
+  };
+}
+
+function emptyLayout() {
+  return {
+    nodes: [], nodeById: new Map(), familyNodes: [], clusters: [], components: 0,
+    generations: new Map(), bounds: { x: 0, y: 0, width: 0, height: 0 },
+    metrics: { CARD_W, CARD_H, MATE_GAP, ROW_GAP, ROW_H },
+  };
+}
+
+// ---- Subset selection -------------------------------------------------------
+
+// Everyone within reach of `startId`: `up` generations of ancestors, `down`
+// generations of descendants, each ancestor's own children (so aunts, uncles
+// and cousins appear rather than a bare pedigree line), and the spouses that
+// make those families whole.
+function relatedSubset(individuals, startId, up = Infinity, down = Infinity) {
+  const picked = new Map();
+  const start = individuals.get(startId);
+  if (!start) return picked;
+
+  const keep = (p) => { if (p) picked.set(p.id, p); };
+  const climbed = new Map();
+  const descended = new Map();
+
+  const descend = (p, depth) => {
+    if (depth > down) return;
+    if ((descended.get(p.id) ?? -1) >= down - depth) return;
+    descended.set(p.id, down - depth);
+    keep(p);
+    for (const f of p.spouseFamilies) {
+      f.spouses.forEach(keep);
+      for (const c of f.childRefs) descend(c, depth + 1);
+    }
+  };
+
+  const climb = (p, depth) => {
+    if (depth > up) return;
+    if ((climbed.get(p.id) ?? -1) >= up - depth) return;
+    climbed.set(p.id, up - depth);
+    keep(p);
+    for (const f of p.parentFamilies) {
+      for (const s of f.spouses) { keep(s); climb(s, depth + 1); }
+      // The siblings of the line, and their families one step on.
+      for (const c of f.childRefs) descend(c, Math.max(0, down - 1));
+    }
+  };
+
+  climb(start, 0);
+  descend(start, 0);
+  return picked;
+}
+
+// ---- Small helpers ----------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const SVGNS = 'http://www.w3.org/2000/svg';
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const el = (tag, attrs) => {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) if (attrs[k] !== null && attrs[k] !== undefined) n.setAttribute(k, attrs[k]);
+  return n;
+};
+// SVG has no text-overflow, so clip on an estimated advance width.
+function fit(text, px, size) {
+  const per = size * 0.53;
+  const max = Math.floor(px / per);
+  if (!text) return '';
+  return text.length <= max ? text : text.slice(0, Math.max(1, max - 1)) + '…';
+}
+
+// ---- State ------------------------------------------------------------------
+let data = null;        // parseGedcom result
+let report = null;      // validateGedcom result
+let view = null;        // current layout
+let selectedId = null;
+let focusId = null;
+let transform = { k: 1, x: 0, y: 0 };
+let severityFilter = 'all';
+// id → the card's body rect, so selection can repaint two cards instead of all.
+const cardBodies = new Map();
+
+// ---- Theme ------------------------------------------------------------------
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  for (const id of ['themeToggle', 'themeToggle2']) {
+    const b = $(id);
+    if (!b) continue;
+    b.textContent = t === 'dark' ? '☀️' : '🌙';
+    b.title = t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+  }
+  try { localStorage.setItem('pqe-theme', t); } catch (e) {}
+  if (view) { drawLegend(); draw(); }
+}
+applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+for (const id of ['themeToggle', 'themeToggle2']) {
+  $(id).addEventListener('click', () =>
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'));
+}
+// Drawing reads its colours from the stylesheet so the two themes stay in one
+// place. The fallbacks are the light-theme values, for environments whose
+// getComputedStyle does not resolve custom properties (jsdom, in the tests).
+const VAR_FALLBACK = {
+  '--bg': '#f3f6f7', '--panel': '#ffffff', '--ink': '#16232b', '--muted': '#5a7184',
+  '--pg': '#336791', '--line': '#d6dee3', '--rule': '#b9c7d1', '--amber': '#b45309',
+  '--m-edge': '#3f7fbf', '--m-fill': '#eef4fa',
+  '--f-edge': '#a8477e', '--f-fill': '#fbeef5',
+  '--u-edge': '#6b7f8c', '--u-fill': '#f1f4f6',
+  '--card-ink': '#16232b', '--card-sub': '#5a7184',
+  '--mono': '"IBM Plex Mono", monospace', '--disp': '"Space Grotesk", sans-serif',
+};
+function cssVar(name) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || VAR_FALLBACK[name] || '#888888';
+}
+
+// ---- Loading ----------------------------------------------------------------
+function setLandingStatus(msg, isErr) {
+  const s = $('landingStatus');
+  s.textContent = msg || '';
+  s.classList.toggle('err', !!isErr);
+}
+
+function readFile(file) {
+  setLandingStatus('Reading ' + file.name + '…');
+  const reader = new FileReader();
+  reader.onerror = () => setLandingStatus('Could not read that file.', true);
+  reader.onload = (e) => {
+    try {
+      load(String(e.target.result), file.name);
+    } catch (err) {
+      setLandingStatus('Could not parse that file: ' + err.message, true);
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function load(text, filename) {
+  data = parseGedcom(text);
+  if (!data.individuals.size) {
+    setLandingStatus('No INDI records found — this does not look like a GEDCOM file.', true);
+    return;
+  }
+  report = validateGedcom(data);
+  document.title = (filename || 'GEDCOM') + ' · GEDCOM Family Tree';
+  focusId = null;
+  selectedId = null;
+  $('viewMode').value = 'all';
+  $('depthWrap').hidden = true;
+  $('landing').style.display = 'none';
+  $('app').classList.add('on');
+  // Loading a second file must not leave the previous one's panels showing.
+  $('sheet').classList.remove('on');
+  $('detail').classList.remove('open');
+  $('hits').hidden = true;
+  $('search').value = '';
+  renderReport(filename);
+  rebuild(true);
+}
+
+// ---- Building the current view ---------------------------------------------
+function rebuild(refit) {
+  const mode = $('viewMode').value;
+  let people = data.individuals;
+  if (mode === 'focus' && focusId) {
+    const d = parseInt($('depth').value, 10);
+    people = relatedSubset(data.individuals, focusId, d, d);
+  }
+  view = layoutGraph(people, data.families);
+  $('empty').hidden = view.nodes.length > 0;
+
+  const total = data.individuals.size;
+  const shown = view.nodes.length;
+  const famTotal = data.families.size;
+  const famShown = view.familyNodes.length;
+  $('counts').innerHTML =
+    '<b>' + shown + '</b>' + (shown < total ? ' of ' + total : '') + ' people · ' +
+    '<b>' + famShown + '</b>' + (famShown < famTotal ? ' of ' + famTotal : '') + ' families · ' +
+    '<b>' + view.generations.size + '</b> generations' +
+    (view.components > 1 ? ' · <b>' + view.components + '</b> separate branches' : '');
+
+  drawLegend();
+  draw();
+  if (refit) fitView();
+}
+
+// ---- Drawing ----------------------------------------------------------------
+const GEN_COLOURS = ['#336791', '#4d8f6a', '#8a6d3b', '#7c3aed', '#b83280', '#0e7490', '#b45309', '#5b6b78'];
+
+function cardColours(node) {
+  const by = $('colourBy').value;
+  if (by === 'none') return { edge: cssVar('--rule'), fill: cssVar('--panel') };
+  if (by === 'gen') {
+    const c = GEN_COLOURS[node.gen % GEN_COLOURS.length];
+    return { edge: c, fill: cssVar('--panel') };
+  }
+  const s = node.person.sex;
+  if (s === 'M') return { edge: cssVar('--m-edge'), fill: cssVar('--m-fill') };
+  if (s === 'F') return { edge: cssVar('--f-edge'), fill: cssVar('--f-fill') };
+  return { edge: cssVar('--u-edge'), fill: cssVar('--u-fill') };
+}
+
+function drawLegend() {
+  const by = $('colourBy').value;
+  const box = $('legend');
+  if (by === 'sex') {
+    box.innerHTML =
+      key(cssVar('--m-fill'), cssVar('--m-edge'), 'male') +
+      key(cssVar('--f-fill'), cssVar('--f-edge'), 'female') +
+      key(cssVar('--u-fill'), cssVar('--u-edge'), 'sex not recorded') +
+      '<span class="k"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="' + cssVar('--pg') + '" stroke-width="2"/></svg> marriage</span>' +
+      '<span class="k"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="' + cssVar('--amber') + '" stroke-width="2" stroke-dasharray="4 3"/></svg> ended</span>';
+  } else if (by === 'gen') {
+    const gens = [...view.generations.keys()].sort((a, b) => a - b);
+    box.innerHTML = gens.map((g) => key(cssVar('--panel'), GEN_COLOURS[g % GEN_COLOURS.length], 'gen ' + (g + 1))).join('');
+  } else {
+    box.innerHTML = '<span class="k">' + view.nodes.length + ' people, oldest generation at the top</span>';
+  }
+}
+const key = (fill, edge, label) =>
+  '<span class="k"><span class="sw" style="background:' + fill + ';border-color:' + edge + '"></span>' + esc(label) + '</span>';
+
+function draw() {
+  const svg = $('canvas');
+  svg.textContent = '';
+  cardBodies.clear();
+  if (!view || !view.nodes.length) return;
+
+  const root = el('g', { id: 'scene' });
+  const linkLayer = el('g', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+  const cardLayer = el('g', {});
+  root.append(linkLayer, cardLayer);
+  svg.append(root);
+
+  const line = cssVar('--rule');
+  const accent = cssVar('--pg');
+  const amber = cssVar('--amber');
+  const { CARD_H } = view.metrics;
+
+  // ── Links ──
+  for (const f of view.familyNodes) {
+    const ended = !!f.family.divorce;
+    const stroke = ended ? amber : accent;
+
+    if (f.mate) {
+      linkLayer.append(el('path', {
+        d: f.mate.adjacent
+          ? `M${f.mate.x1},${f.mate.y1} H${f.mate.x2}`
+          : `M${f.mate.x1},${f.mate.y1} C${f.mate.x1 + 34},${f.mate.y1 - 26} ${f.mate.x2 - 34},${f.mate.y2 - 26} ${f.mate.x2},${f.mate.y2}`,
+        fill: 'none', stroke, 'stroke-width': 1.6,
+        'stroke-dasharray': ended ? '4 3' : null,
+        opacity: f.mate.adjacent ? 0.95 : 0.6,
+      }));
+      const mx = (f.mate.x1 + f.mate.x2) / 2, my = (f.mate.y1 + f.mate.y2) / 2;
+      if (f.mate.adjacent) {
+        linkLayer.append(el('circle', { cx: mx, cy: my, r: 3.4, fill: cssVar('--bg'), stroke, 'stroke-width': 1.6 }));
+        if (f.family.marriageYear !== null) {
+          const t = el('text', {
+            x: mx, y: my - 8, 'text-anchor': 'middle', fill: cssVar('--muted'),
+            'font-family': cssVar('--mono'), 'font-size': 9.5,
+          });
+          t.textContent = f.family.marriageYear;
+          linkLayer.append(t);
+        }
+      }
+    }
+
+    if (!f.childNodes.length) continue;
+    const barY = f.barY;
+    const xs = f.childNodes.map((n) => n.x + n.w / 2);
+    const left = Math.min(...xs, f.x), right = Math.max(...xs, f.x);
+
+    // stem down from the couple, sibling bar, then a riser to each child
+    linkLayer.append(el('path', { d: `M${f.x},${f.y} V${barY}`, fill: 'none', stroke: line, 'stroke-width': 1.4 }));
+    if (right - left > 0.5) {
+      linkLayer.append(el('path', { d: `M${left},${barY} H${right}`, fill: 'none', stroke: line, 'stroke-width': 1.4 }));
+    }
+    for (const c of f.childNodes) {
+      const cx = c.x + c.w / 2;
+      const rel = f.family.childRelations[c.id];
+      linkLayer.append(el('path', {
+        d: `M${cx},${barY} V${c.y}`, fill: 'none', stroke: rel ? amber : line,
+        'stroke-width': 1.4, 'stroke-dasharray': rel ? '3 3' : null,
+      }));
+    }
+  }
+
+  // ── Cards ──
+  for (const n of view.nodes) {
+    const p = n.person;
+    const c = cardColours(n);
+    const g = el('g', { transform: `translate(${n.x},${n.y})`, class: 'card', 'data-id': p.id, tabindex: '0', role: 'button' });
+    const tip = el('title', {});
+    tip.textContent = p.name.full + (p.lifespan ? ' (' + p.lifespan + ')' : '');
+    g.append(tip);
+
+    const body = el('rect', {
+      class: 'body',
+      width: n.w, height: n.h, rx: 7, fill: c.fill,
+      stroke: p.id === selectedId ? accent : cssVar('--line'),
+      'stroke-width': p.id === selectedId ? 2.2 : 1,
+    });
+    g.append(body);
+    cardBodies.set(p.id, body);
+    g.append(el('rect', { width: 3, height: n.h, rx: 1.5, fill: c.edge }));
+    // Solid stand-in used only at overview zoom, where the tint is too faint
+    // to see and the labels are hidden.
+    g.append(el('rect', { class: 'far-fill', width: n.w, height: n.h, rx: 7, fill: c.edge, opacity: 0 }));
+
+    const given = el('text', {
+      x: 12, y: 22, fill: cssVar('--card-ink'), 'font-family': cssVar('--disp'),
+      'font-size': 13, 'font-weight': 500,
+    });
+    given.textContent = fit(p.name.given || p.name.full, n.w - 20, 13);
+    g.append(given);
+
+    if (p.name.surname) {
+      const sur = el('text', {
+        x: 12, y: 38, fill: c.edge, 'font-family': cssVar('--disp'),
+        'font-size': 12, 'font-weight': 700, 'letter-spacing': '0.02em',
+      });
+      sur.textContent = fit(p.name.surname.toUpperCase(), n.w - 20, 12);
+      g.append(sur);
+    }
+
+    if (p.lifespan) {
+      const ls = el('text', {
+        x: 12, y: CARD_H - 9, fill: cssVar('--card-sub'),
+        'font-family': cssVar('--mono'), 'font-size': 10.5,
+      });
+      ls.textContent = fit(p.lifespan, n.w - 20, 10.5);
+      g.append(ls);
+    }
+    cardLayer.append(g);
+  }
+
+  applyTransform();
+}
+
+// Selection touches two cards, so it repaints those rather than the whole scene
+// — a full redraw of a few hundred cards is visible as a stutter on every click.
+function paintSelection(previousId) {
+  for (const id of [previousId, selectedId]) {
+    if (!id) continue;
+    const body = cardBodies.get(id);
+    if (!body) continue;
+    const on = id === selectedId;
+    body.setAttribute('stroke', on ? cssVar('--pg') : cssVar('--line'));
+    body.setAttribute('stroke-width', on ? 2.2 : 1);
+  }
+}
+
+// ---- Zoom and pan -----------------------------------------------------------
+const FAR_ZOOM = 0.3;
+
+function applyTransform() {
+  const scene = $('canvas').querySelector('#scene');
+  if (scene) {
+    scene.setAttribute('transform', `translate(${transform.x},${transform.y}) scale(${transform.k})`);
+    scene.classList.toggle('far', transform.k < FAR_ZOOM);
+  }
+  const pct = transform.k * 100;
+  $('zoomLabel').textContent = (pct < 10 ? pct.toFixed(1) : Math.round(pct)) + '%';
+  $('zoomLabel').title = transform.k < FAR_ZOOM
+    ? 'Overview — click a card or search for someone to zoom in'
+    : 'Scroll to zoom, drag to pan';
+}
+
+function fitView() {
+  if (!view || !view.nodes.length) return;
+  const svg = $('canvas');
+  const W = svg.clientWidth, H = svg.clientHeight;
+  const b = view.bounds;
+  const pad = 40;
+  const k = Math.max(0.02, Math.min((W - pad * 2) / b.width, (H - pad * 2) / b.height, 1.4));
+  transform = {
+    k,
+    x: W / 2 - k * (b.x + b.width / 2),
+    y: H / 2 - k * (b.y + b.height / 2),
+  };
+  applyTransform();
+}
+
+function zoomAt(factor, cx, cy) {
+  const k = Math.max(0.02, Math.min(4, transform.k * factor));
+  const r = k / transform.k;
+  transform = { k, x: cx - (cx - transform.x) * r, y: cy - (cy - transform.y) * r };
+  applyTransform();
+}
+
+function centreOn(id, k) {
+  const n = view && view.nodeById.get(id);
+  if (!n) return;
+  const svg = $('canvas');
+  transform.k = k || Math.max(transform.k, 0.75);
+  transform.x = svg.clientWidth / 2 - transform.k * (n.x + n.w / 2);
+  transform.y = svg.clientHeight / 2 - transform.k * (n.y + n.h / 2);
+  applyTransform();
+}
+
+(function wireCanvas() {
+  const svg = $('canvas');
+  let dragging = false, moved = false, last = null;
+
+  svg.addEventListener('pointerdown', (e) => {
+    dragging = true; moved = false;
+    last = { x: e.clientX, y: e.clientY };
+    svg.classList.add('drag');
+    svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - last.x, dy = e.clientY - last.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    transform.x += dx; transform.y += dy;
+    last = { x: e.clientX, y: e.clientY };
+    applyTransform();
+  });
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    svg.classList.remove('drag');
+    try { svg.releasePointerCapture(e.pointerId); } catch (err) {}
+  };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+
+  svg.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const r = svg.getBoundingClientRect();
+    zoomAt(Math.pow(0.999, e.deltaY), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+
+  svg.addEventListener('click', (e) => {
+    if (moved) return;
+    const card = e.target.closest('.card');
+    if (card) showPerson(card.getAttribute('data-id'));
+    else closeDetail();
+  });
+  svg.addEventListener('keydown', (e) => {
+    const card = e.target.closest && e.target.closest('.card');
+    if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showPerson(card.getAttribute('data-id')); }
+  });
+})();
+
+// ---- Detail drawer ----------------------------------------------------------
+function showPerson(id) {
+  const p = data.individuals.get(id);
+  if (!p) return;
+  const previous = selectedId;
+  selectedId = id;
+  paintSelection(previous);
+
+  $('dName').innerHTML = esc(p.name.given || p.name.full) +
+    (p.name.surname ? ' <span class="sur">' + esc(p.name.surname) + '</span>' : '') +
+    (p.name.suffix ? ' ' + esc(p.name.suffix) : '');
+  const sexLabel = { M: 'male', F: 'female' }[p.sex] || 'sex not recorded';
+  $('dMeta').textContent = [sexLabel, p.lifespan, p.id].filter(Boolean).join(' · ');
+
+  const out = [];
+  out.push('<div class="dactions">' +
+    '<button class="secondary" data-act="focus">Show their relatives</button>' +
+    '<button class="ghost" data-act="centre">Centre in the tree</button>' +
+    '</div>');
+
+  if (p.names.length > 1) {
+    out.push(section('Also recorded as', p.names.slice(1).map((n) =>
+      '<div class="kv"><b>' + esc(n.full) + '</b>' + (n.type ? ' — ' + esc(n.type) : '') + '</div>').join('')));
+  }
+  if (p.name.nickname) out.push(section('Known as', '<div class="kv"><b>' + esc(p.name.nickname) + '</b></div>'));
+
+  const events = [...p.events, ...p.attributes].filter((e) => e.hasContent);
+  if (events.length) {
+    events.sort((a, b) => (a.date.sortKey ?? Infinity) - (b.date.sortKey ?? Infinity));
+    out.push(section('Life events', events.map(eventHtml).join('')));
+  }
+
+  out.push(people('Parents', p.parents, p));
+  out.push(people('Siblings', p.siblings, p));
+
+  for (const f of p.spouseFamilies) {
+    const sp = f.spouses.filter((s) => s !== p);
+    const bits = [];
+    if (sp.length) bits.push(sp.map((s) => personLink(s)).join(''));
+    else bits.push('<div class="kv">Spouse not recorded</div>');
+    if (f.marriage && (f.marriage.date.display || f.marriage.place)) {
+      bits.push('<div class="ev"><div class="lbl">' + esc(f.marriage.label) + '</div>' +
+        (f.marriage.date.display ? '<div class="when">' + esc(f.marriage.date.display) + '</div>' : '') +
+        (f.marriage.place ? '<div class="where">' + esc(f.marriage.place) + '</div>' : '') + '</div>');
+    }
+    if (f.divorce) bits.push('<div class="ev odd"><div class="lbl">' + esc(f.divorce.label) +
+      '</div>' + (f.divorce.date.display ? '<div class="when">' + esc(f.divorce.date.display) + '</div>' : '') + '</div>');
+    if (f.childRefs.length) {
+      bits.push('<div class="kv" style="margin-top:8px">Children (' + f.childRefs.length + ')</div>');
+      bits.push(f.childRefs.map((c) => personLink(c, f.childRelations[c.id])).join(''));
+    }
+    if (f.danglingSpouses.length || f.danglingChildren.length) {
+      bits.push('<div class="kv" style="color:var(--red)">Broken link to ' +
+        esc([...f.danglingSpouses, ...f.danglingChildren].join(', ')) + '</div>');
+    }
+    out.push(section(sp.length ? 'Family with ' + esc(sp[0].name.full) : 'Family', bits.join('')));
+  }
+
+  if (p.notes.length) {
+    out.push(section('Notes', p.notes.map((n) =>
+      '<div class="ev"><div class="txt">' + esc(n.text || resolveNote(n.ref)) + '</div></div>').join('')));
+  }
+
+  const media = p.objectRefs.map((r) => data.objects.get(r)).filter(Boolean);
+  if (media.length) {
+    out.push(section('Attached media', media.map((m) =>
+      '<div class="kv"><b>' + esc(m.title || m.description || m.id) + '</b>' +
+      (m.file ? ' — ' + esc(m.file) : ' — <span style="color:var(--amber)">no file reference in this export</span>') +
+      '</div>').join('')));
+  }
+
+  const srcs = p.sourceRefs.map((r) => data.sources.get(r)).filter(Boolean);
+  if (srcs.length) {
+    out.push(section('Sources (' + srcs.length + ')', srcs.map((s) =>
+      '<div class="kv"><b>' + esc(s.title || s.id) + '</b>' + (s.author ? ' — ' + esc(s.author) : '') + '</div>').join('')));
+  }
+
+  const body = $('dBody');
+  body.innerHTML = out.filter(Boolean).join('');
+  body.scrollTop = 0;
+  body.querySelectorAll('[data-goto]').forEach((b) =>
+    b.addEventListener('click', () => showPerson(b.getAttribute('data-goto'))));
+  body.querySelector('[data-act="focus"]').addEventListener('click', () => {
+    focusId = id;
+    $('viewMode').value = 'focus';
+    $('depthWrap').hidden = false;
+    rebuild(true);
+    setTimeout(() => centreOn(id, 1), 30);
+  });
+  body.querySelector('[data-act="centre"]').addEventListener('click', () => centreOn(id, 1));
+
+  $('detail').classList.add('open');
+  if (view && !view.nodeById.has(id)) {
+    // Selected from search but outside the current view — widen to everyone.
+    $('viewMode').value = 'all';
+    $('depthWrap').hidden = true;
+    rebuild(false);
+  }
+  centreOn(id, Math.max(transform.k, 0.7));
+}
+
+function section(title, html) {
+  if (!html) return '';
+  return '<div class="dsec"><h4>' + title + '</h4>' + html + '</div>';
+}
+function people(title, list, self) {
+  if (!list || !list.length) return '';
+  return section(title, list.filter((x) => x !== self).map((x) => personLink(x)).join(''));
+}
+function personLink(p, rel) {
+  return '<button class="plink" data-goto="' + esc(p.id) + '">' +
+    '<span class="dot ' + (p.sex || 'U') + '"></span>' +
+    '<span>' + esc(p.name.full) + '</span>' +
+    (rel ? '<span class="rel">' + esc(rel) + '</span>' : '') +
+    (p.lifespan ? '<span class="yrs">' + esc(p.lifespan) + '</span>' : '') +
+    '</button>';
+}
+function eventHtml(e) {
+  return '<div class="ev' + (e.misplaced ? ' odd' : '') + '">' +
+    '<div class="lbl">' + esc(e.label) + (e.misplaced ? ' <span class="rel">recorded on the individual</span>' : '') + '</div>' +
+    (e.date.display ? '<div class="when">' + esc(e.date.display) + '</div>' : '') +
+    (!e.date.display && e.date.raw ? '<div class="when" style="color:var(--amber)">' + esc(e.date.raw) + '</div>' : '') +
+    (e.place ? '<div class="where">' + esc(e.place) + '</div>' : '') +
+    (e.value && e.value !== 'Y' ? '<div class="txt">' + esc(e.value) + '</div>' : '') +
+    (e.cause ? '<div class="txt">Cause: ' + esc(e.cause) + '</div>' : '') +
+    (e.age ? '<div class="txt">Age: ' + esc(e.age) + '</div>' : '') +
+    e.notes.map((n) => '<div class="txt">' + esc(n.text || resolveNote(n.ref)) + '</div>').join('') +
+    '</div>';
+}
+const resolveNote = (ref) => {
+  const n = ref && data.notes.get(ref);
+  return n ? n.text : '';
+};
+function closeDetail() {
+  $('detail').classList.remove('open');
+  const previous = selectedId;
+  selectedId = null;
+  paintSelection(previous);
+}
+
+// ---- Search -----------------------------------------------------------------
+let hitList = [], hitIndex = -1;
+function runSearch(q) {
+  const box = $('hits');
+  const term = q.trim().toLowerCase();
+  if (!term) { box.hidden = true; return; }
+  hitList = [];
+  for (const p of data.individuals.values()) {
+    const name = p.name.full.toLowerCase();
+    const i = name.indexOf(term);
+    if (i >= 0) hitList.push({ p, rank: i === 0 ? 0 : 1, name });
+    if (hitList.length > 400) break;
+  }
+  hitList.sort((a, b) => a.rank - b.rank || (a.p.birthYear ?? 9999) - (b.p.birthYear ?? 9999));
+  hitList = hitList.slice(0, 40);
+  if (!hitList.length) {
+    box.innerHTML = '<div class="hit"><span class="yrs">no match</span></div>';
+    box.hidden = false;
+    return;
+  }
+  hitIndex = -1;
+  box.innerHTML = hitList.map((h, i) =>
+    '<div class="hit" data-i="' + i + '"><span class="dot ' + (h.p.sex || 'U') + '"></span>' +
+    '<span>' + esc(h.p.name.full) + '</span>' +
+    '<span class="yrs">' + esc(h.p.lifespan) + '</span></div>').join('');
+  box.querySelectorAll('.hit').forEach((n) =>
+    n.addEventListener('click', () => pickHit(parseInt(n.getAttribute('data-i'), 10))));
+  box.hidden = false;
+}
+function pickHit(i) {
+  const h = hitList[i];
+  if (!h) return;
+  $('hits').hidden = true;
+  $('search').value = '';
+  showPerson(h.p.id);
+}
+$('search').addEventListener('input', (e) => runSearch(e.target.value));
+$('search').addEventListener('keydown', (e) => {
+  const box = $('hits');
+  if (box.hidden) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    hitIndex = Math.max(0, Math.min(hitList.length - 1, hitIndex + (e.key === 'ArrowDown' ? 1 : -1)));
+    box.querySelectorAll('.hit').forEach((n, i) => n.classList.toggle('on', i === hitIndex));
+    const on = box.querySelector('.hit.on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    pickHit(hitIndex >= 0 ? hitIndex : 0);
+  } else if (e.key === 'Escape') {
+    box.hidden = true;
+  }
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.searchwrap')) $('hits').hidden = true;
+});
+
+// ---- Report -----------------------------------------------------------------
+function renderReport(filename) {
+  const h = data.header || {};
+  const c = report.counts;
+  const verdict = report.errors === 0
+    ? '<span class="chip ok">conforms to 5.5.1</span>'
+    : '<span class="chip error">' + report.errors + ' specification ' + plural(report.errors, 'error') +
+      ' across ' + report.errorRules + ' ' + plural(report.errorRules, 'rule') + '</span>';
+
+  const html = [];
+  html.push('<div class="verdict">' + verdict +
+    (report.warnings ? '<span class="chip warning">' + report.warnings + ' ' + plural(report.warnings, 'warning') + '</span>' : '') +
+    (report.infos ? '<span class="chip info">' + report.infos + ' ' + plural(report.infos, 'note') + '</span>' : '') +
+    '</div>');
+
+  html.push('<h2>The file</h2>');
+  html.push('<div class="statgrid">' +
+    stat(c.individuals, 'individuals') +
+    stat(c.families, 'families') +
+    stat(c.sources, 'source records') +
+    stat(c.objects, 'multimedia records') +
+    stat(c.lines.toLocaleString(), 'lines') +
+    stat(c.records.toLocaleString(), 'records') +
+    '</div>');
+
+  html.push('<div class="note" style="margin-bottom:26px">' +
+    kv('File', filename || '(unnamed)') +
+    kv('Written by', [h.source, h.sourceName, h.sourceVersion].filter(Boolean).join(' · ') || '(not stated)') +
+    (h.tree ? kv('Tree', h.tree) : '') +
+    kv('Exported', h.date || '(not stated)') +
+    kv('Format', [h.version ? 'GEDCOM ' + h.version : '', h.form].filter(Boolean).join(' · ') || '(not stated)') +
+    kv('Character set', h.charset || '(not stated)') +
+    '</div>');
+
+  html.push('<h2>Findings</h2>');
+  html.push('<div class="filterrow">' +
+    ['all', 'error', 'warning', 'info'].map((s) =>
+      '<button class="ghost" data-sev="' + s + '" aria-pressed="' + (s === severityFilter) + '">' +
+      (s === 'all' ? 'Everything' : s === 'info' ? 'Notes' : s.charAt(0).toUpperCase() + s.slice(1) + 's') +
+      '</button>').join('') +
+    '<span class="hint" style="margin-left:auto">' + report.checks + ' rules applied</span></div>');
+
+  html.push('<div id="findings">' + findingsHtml() + '</div>');
+
+  html.push('<footer class="doc">Checked against <i>The GEDCOM Standard, Release 5.5.1</i> ' +
+    '(lineage-linked form). Errors are places where the file departs from the specification; ' +
+    'warnings are legal but lossy or ambiguous; notes are observations. ' +
+    'Everything readable is drawn in the tree regardless.</footer>');
+
+  $('sheetBody').innerHTML = html.join('');
+  $('sheetBody').querySelectorAll('[data-sev]').forEach((b) =>
+    b.addEventListener('click', () => {
+      severityFilter = b.getAttribute('data-sev');
+      $('sheetBody').querySelectorAll('[data-sev]').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x.getAttribute('data-sev') === severityFilter)));
+      $('findings').innerHTML = findingsHtml();
+    }));
+}
+
+function findingsHtml() {
+  const list = report.findings.filter((f) => severityFilter === 'all' || f.severity === severityFilter);
+  if (!list.length) return '<p class="hint">Nothing in this category.</p>';
+  return list.map((f) =>
+    '<div class="finding ' + f.severity + '">' +
+      '<div class="fhead"><span class="cat">' + esc(f.category) + '</span>' +
+      '<span class="t">' + esc(f.title) + '</span>' +
+      '<span class="n">' + f.count + '×</span></div>' +
+      '<p>' + esc(f.detail) + '</p>' +
+      (f.samples.length ? '<ul class="samples">' + f.samples.map((s) =>
+        '<li>' + (s.line ? '<span class="ln">line ' + s.line + '</span>  ' : '') + esc(s.text) + '</li>').join('') + '</ul>' : '') +
+    '</div>').join('');
+}
+
+const stat = (n, l) => '<div class="stat"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>';
+const kv = (k, v) => '<div class="kv">' + k + ': <b>' + esc(v) + '</b></div>';
+const plural = (n, w) => (n === 1 ? w : w + 's');
+
+// ---- SVG download -----------------------------------------------------------
+function downloadSvg() {
+  if (!view || !view.nodes.length) return;
+  const b = view.bounds, pad = 30;
+  const clone = $('canvas').cloneNode(true);
+  const scene = clone.querySelector('#scene');
+  // The exported file carries no stylesheet, so undo the overview simplification.
+  scene.classList.remove('far');
+  scene.querySelectorAll('.far-fill').forEach((n) => n.remove());
+  scene.setAttribute('transform', `translate(${pad - b.x},${pad - b.y})`);
+  clone.setAttribute('xmlns', SVGNS);
+  clone.setAttribute('width', Math.round(b.width + pad * 2));
+  clone.setAttribute('height', Math.round(b.height + pad * 2));
+  clone.setAttribute('viewBox', `0 0 ${Math.round(b.width + pad * 2)} ${Math.round(b.height + pad * 2)}`);
+  const bgRect = document.createElementNS(SVGNS, 'rect');
+  bgRect.setAttribute('width', '100%');
+  bgRect.setAttribute('height', '100%');
+  bgRect.setAttribute('fill', cssVar('--bg'));
+  clone.insertBefore(bgRect, clone.firstChild);
+
+  const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + clone.outerHTML], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'family-tree.svg';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// ---- Wiring -----------------------------------------------------------------
+$('drop').addEventListener('click', () => $('filePicker').click());
+$('drop').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('filePicker').click(); } });
+$('filePicker').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) readFile(f); e.target.value = ''; });
+for (const ev of ['dragenter', 'dragover']) {
+  $('drop').addEventListener(ev, (e) => { e.preventDefault(); $('drop').classList.add('over'); });
+}
+for (const ev of ['dragleave', 'dragend']) {
+  $('drop').addEventListener(ev, () => $('drop').classList.remove('over'));
+}
+$('drop').addEventListener('drop', (e) => {
+  e.preventDefault();
+  $('drop').classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) readFile(f);
+});
+// Ignore files dropped anywhere else rather than navigating away from the page.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+
+$('viewMode').addEventListener('change', () => {
+  const focus = $('viewMode').value === 'focus';
+  $('depthWrap').hidden = !focus;
+  if (focus && !focusId) focusId = selectedId || [...data.individuals.keys()][0];
+  rebuild(true);
+});
+$('depth').addEventListener('input', () => {
+  $('depthLabel').textContent = $('depth').value;
+  rebuild(true);
+});
+$('colourBy').addEventListener('change', () => { drawLegend(); draw(); });
+$('btnFit').addEventListener('click', () => fitView());
+$('btnIn').addEventListener('click', () => zoomAt(1.3, $('canvas').clientWidth / 2, $('canvas').clientHeight / 2));
+$('btnOut').addEventListener('click', () => zoomAt(1 / 1.3, $('canvas').clientWidth / 2, $('canvas').clientHeight / 2));
+$('btnSvg').addEventListener('click', downloadSvg);
+$('btnNew').addEventListener('click', () => $('filePicker').click());
+$('btnReport').addEventListener('click', () => $('sheet').classList.add('on'));
+$('sheetClose').addEventListener('click', () => $('sheet').classList.remove('on'));
+$('dClose').addEventListener('click', closeDetail);
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, select, textarea')) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  if (e.key === 'Escape') {
+    if ($('sheet').classList.contains('on')) $('sheet').classList.remove('on');
+    else closeDetail();
+  } else if (e.key === '/') { e.preventDefault(); $('search').focus(); }
+  else if (e.key === 'f') fitView();
+  else if (e.key === '+' || e.key === '=') zoomAt(1.3, $('canvas').clientWidth / 2, $('canvas').clientHeight / 2);
+  else if (e.key === '-') zoomAt(1 / 1.3, $('canvas').clientWidth / 2, $('canvas').clientHeight / 2);
+});
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (view) applyTransform(); }, 150);
+});
+
+// Exposed so the smoke test can drive the page without a file input.
+window.__loadGedcom = load;
+Object.defineProperty(window, '__viewBounds', { get: () => (view ? view.bounds : null) });
+</script>
+</body>
+</html>

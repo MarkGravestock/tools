@@ -1,0 +1,77 @@
+0 HEAD
+1 SOUR TestSuite
+2 NAME Family Tree Test Suite
+2 VERS 1.0
+1 DATE 15 AUG 2026
+1 FILE clean.ged
+1 GEDC
+2 VERS 5.5.1
+2 FORM LINEAGE-LINKED
+1 CHAR UTF-8
+1 SUBM @U1@
+0 @U1@ SUBM
+1 NAME Test Submitter
+0 @I1@ INDI
+1 NAME Alfred James /Wren/
+2 GIVN Alfred James
+2 SURN Wren
+1 SEX M
+1 BIRT
+2 DATE 12 JAN 1898
+2 PLAC Watford, Hertfordshire, England
+1 DEAT
+2 DATE 3 MAR 1971
+2 PLAC St Albans, Hertfordshire, England
+1 OCCU Signalman
+2 DATE FROM 1920 TO 1958
+1 FAMS @F1@
+0 @I2@ INDI
+1 NAME Edith /Bramley/
+2 GIVN Edith
+2 SURN Bramley
+1 SEX F
+1 BIRT
+2 DATE ABT 1900
+2 PLAC Luton, Bedfordshire, England
+1 DEAT
+2 DATE BET 1975 AND 1977
+1 FAMS @F1@
+0 @I3@ INDI
+1 NAME Margaret /Wren/
+2 GIVN Margaret
+2 SURN Wren
+1 SEX F
+1 BIRT
+2 DATE 4 SEP 1925
+1 FAMC @F1@
+1 FAMS @F2@
+0 @I4@ INDI
+1 NAME Thomas /Neale/
+2 GIVN Thomas
+2 SURN Neale
+1 SEX M
+1 BIRT
+2 DATE 1922
+1 FAMS @F2@
+0 @I5@ INDI
+1 NAME Peter /Neale/
+2 GIVN Peter
+2 SURN Neale
+1 SEX M
+1 BIRT
+2 DATE 1949
+1 FAMC @F2@
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I2@
+1 CHIL @I3@
+1 MARR
+2 DATE 6 JUN 1923
+2 PLAC Watford, Hertfordshire, England
+0 @F2@ FAM
+1 HUSB @I4@
+1 WIFE @I3@
+1 CHIL @I5@
+1 MARR
+2 DATE 2 APR 1948
+0 TRLR

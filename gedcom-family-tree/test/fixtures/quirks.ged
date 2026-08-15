@@ -1,0 +1,205 @@
+0 HEAD
+1 SOUR Ancestry.com Family Trees
+2 NAME Ancestry.com Member Trees
+2 VERS 2025.08
+2 _TREE Quirks test tree
+1 DATE 15 AUG 2026
+1 GEDC
+2 VERS 5.5.1
+2 FORM LINEAGE-LINKED
+1 CHAR UTF-8
+1 SUBM @U1@
+0 @U1@ SUBM
+1 NAME Quirks Submitter
+0 @I1@ INDI
+1 NAME Walter Henry /Ashby/
+2 GIVN Walter Henry
+2 SURN Ashby
+2 SOUR @S1@
+3 _APID 1,8753::8978497
+1 SEX M
+1 BIRT
+2 DATE 06/10/1842
+2 PLAC Berkhamsted, Hertfordshire, England
+1 DEAT
+2 DATE January 1906
+2 PLAC Watford, Hertfordshire, England,
+1 RESI
+2 DATE 2003-2005
+2 PLAC London, London, England
+1 OCCU
+2 PLAC Police man
+1 MARR
+2 DATE Apr 1866
+2 PLAC Tunbridge Wells, Kent
+1 ADDR
+2 DATE 1908
+2 PLAC 31 Souldern Street, Watford
+1 _MILT
+2 DATE 1914-1920
+2 PLAC Ipswich
+1 NOTE This note is split
+2 CONC  across a CONC line,
+2 CONT and continues on a CONT line.
+1 OBJE @O1@
+1 FAMS @F1@
+1 FAMS @F2@
+0 @I2@ INDI
+1 NAME Elizabeth Betsy /Dean/
+2 GIVN Elizabeth Betsy
+2 SURN Dean
+1 NAME Betsy /Dean/
+2 GIVN Betsy
+2 SURN Dean
+1 SEX F
+1 BIRT
+2 DATE Abt. 1845
+1 DEAT
+2 DATE 29/12/1903
+1 FAMS @F1@
+0 @I3@ INDI
+1 NAME Sarah /Hollis/
+2 GIVN Sarah
+2 SURN Hollis
+1 SEX F
+1 BIRT
+2 DATE 1851
+1 FAMS @F2@
+0 @I4@ INDI
+1 NAME George /Ashby/
+2 GIVN George
+2 SURN Ashby
+1 SEX M
+1 BIRT
+2 DATE 3 FEB 1867
+1 BAPM
+2 DATE St Pauls, Hemel Hempstead
+1 DEAT
+2 DATE DEC
+1 FAMC @F1@
+1 FAMC @F3@
+1 FAMS @F4@
+0 @I5@ INDI
+1 NAME Annie /Ashby/
+2 GIVN Annie
+2 SURN Ashby
+1 BIRT
+2 DATE 1870
+1 FAMC @F1@
+0 @I6@ INDI
+1 NAME Harold /Ashby/
+2 GIVN Harold
+2 SURN Ashby
+1 SEX M
+1 BIRT
+2 DATE 1874
+1 DEAT
+2 DATE 1871
+1 FAMC @F2@
+0 @I7@ INDI
+1 NAME Mary Ann /Sturgess/
+2 GIVN Mary Ann
+2 SURN Sturgess
+1 SEX F
+1 BIRT
+2 DATE 1869
+1 FAMS @F4@
+0 @I8@ INDI
+1 NAME Emily /Ashby/
+2 GIVN Emily
+2 SURN Ashby
+1 SEX F
+1 BIRT
+2 DATE 1893
+1 FAMC @F4@
+0 @I9@ INDI
+1 NAME Reuben /Wickens/
+2 GIVN Reuben
+2 SURN Wickens
+1 SEX M
+1 BIRT
+2 DATE 1831
+1 FAMS @F3@
+0 @I10@ INDI
+1 NAME Charlotte /Peck/
+2 GIVN Charlotte
+2 SURN Peck
+1 SEX F
+1 BIRT
+2 DATE 1856
+0 @I11@ INDI
+1 NAME Jabez /Loom/
+2 GIVN Jabez
+2 SURN Loom
+1 SEX M
+1 BIRT
+2 DATE 1901
+1 FAMS @F5@
+0 @I12@ INDI
+1 NAME Ada /Frost/
+2 GIVN Ada
+2 SURN Frost
+1 SEX F
+1 BIRT
+2 DATE 1904
+1 FAMS @F5@
+0 @I13@ INDI
+1 NAME Silas /Loom/
+2 GIVN Silas
+2 SURN Loom
+1 SEX M
+1 BIRT
+2 DATE 1928
+1 FAMC @F5@
+1 NOTE A deliberately long note used to check the 255-character line limit: the GEDCOM 5.5.1 specification limits a single physical line to 255 characters including the level number and the tag, and expects longer text to be broken up with CONC and CONT lines instead of running on.
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I2@
+1 CHIL @I4@
+1 CHIL @I5@
+1 MARR
+2 DATE Apr 1866
+2 PLAC  Croydon, Surrey, England
+0 @F2@ FAM
+1 HUSB @I1@
+1 WIFE @I3@
+1 CHIL @I6@
+1 MARR
+2 DATE 1873
+0 @F3@ FAM
+1 HUSB @I9@
+1 WIFE @I10@
+1 CHIL @I4@
+2 _MREL step
+0 @F4@ FAM
+1 HUSB @I4@
+1 WIFE @I7@
+1 CHIL @I8@
+1 MARR
+2 DATE 12 OCT 1892
+1 DIV
+2 DATE 1901
+0 @F5@ FAM
+1 HUSB @I11@
+1 WIFE @I99@
+1 CHIL @I13@
+1 MARR
+2 DATE 1927
+0 @O1@ OBJE
+1 FILE
+2 FORM jpg
+3 TYPE image
+2 TITL image
+1 DATE 7 Dec 2020
+1 PLAC Berkhamsted, Hertfordshire, England
+0 @O2@ OBJE
+1 FILE portrait.jpg
+0 @S1@ SOUR
+1 TITL England and Wales Marriage Registration Index
+1 AUTH Test Registry
+0 @S2@ SOUR
+1 TITL A source nothing points at
+0 @T1@ _MTTAG
+1 NAME Prioritized Ancestor
+1 RIN 1
+0 TRLR
