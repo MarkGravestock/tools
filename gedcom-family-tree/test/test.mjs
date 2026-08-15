@@ -206,6 +206,52 @@ check('remarried person sits between both spouses', (() => {
   return (a.x < w.x && w.x < b.x) || (b.x < w.x && w.x < a.x);
 })());
 
+section('Sibling groups stay together');
+// Two unrelated sibling groups (Alice/Bob/Carol and Dave/Eve/Frank), joined
+// into one component only through a grandchild-generation marriage — so
+// nobody at generation 1 is married across the two families. If the
+// generation-1 walk ever degrades to visiting clusters in raw birth-year
+// order (the failure mode of a broken parent→child recursion), interleaving
+// by birth year would put Dave (1802) and Eve (1807) between Alice (1800)
+// and Bob (1805)/Carol (1810). A working walk keeps each family's row
+// contiguous regardless of birth-year interleaving between families.
+const sibs = parseGedcom([
+  '0 HEAD', '1 SOUR X', '1 GEDC', '2 VERS 5.5.1', '2 FORM LINEAGE-LINKED', '1 CHAR UTF-8',
+  '0 @PA1@ INDI', '1 NAME PA1 /A/', '1 SEX M', '1 FAMS @FA@',
+  '0 @PA2@ INDI', '1 NAME PA2 /A/', '1 SEX F', '1 FAMS @FA@',
+  '0 @Alice@ INDI', '1 NAME Alice /A/', '1 SEX F', '1 BIRT', '2 DATE 1800', '1 FAMC @FA@',
+  '0 @Bob@ INDI', '1 NAME Bob /A/', '1 SEX M', '1 BIRT', '2 DATE 1805', '1 FAMC @FA@', '1 FAMS @FBob@',
+  '0 @Carol@ INDI', '1 NAME Carol /A/', '1 SEX F', '1 BIRT', '2 DATE 1810', '1 FAMC @FA@',
+  '0 @PB1@ INDI', '1 NAME PB1 /B/', '1 SEX M', '1 FAMS @FB@',
+  '0 @PB2@ INDI', '1 NAME PB2 /B/', '1 SEX F', '1 FAMS @FB@',
+  '0 @Dave@ INDI', '1 NAME Dave /B/', '1 SEX M', '1 BIRT', '2 DATE 1802', '1 FAMC @FB@',
+  '0 @Eve@ INDI', '1 NAME Eve /B/', '1 SEX F', '1 BIRT', '2 DATE 1807', '1 FAMC @FB@', '1 FAMS @FEve@',
+  '0 @Frank@ INDI', '1 NAME Frank /B/', '1 SEX M', '1 BIRT', '2 DATE 1812', '1 FAMC @FB@',
+  '0 @BobSpouse@ INDI', '1 NAME Bob /Spouse/', '1 SEX F', '1 FAMS @FBob@',
+  '0 @BobChild@ INDI', '1 NAME Bob /Child/', '1 SEX M', '1 FAMC @FBob@', '1 FAMS @FCousins@',
+  '0 @EveSpouse@ INDI', '1 NAME Eve /Spouse/', '1 SEX M', '1 FAMS @FEve@',
+  '0 @EveChild@ INDI', '1 NAME Eve /Child/', '1 SEX F', '1 FAMC @FEve@', '1 FAMS @FCousins@',
+  '0 @FA@ FAM', '1 HUSB @PA1@', '1 WIFE @PA2@', '1 CHIL @Alice@', '1 CHIL @Bob@', '1 CHIL @Carol@',
+  '0 @FB@ FAM', '1 HUSB @PB1@', '1 WIFE @PB2@', '1 CHIL @Dave@', '1 CHIL @Eve@', '1 CHIL @Frank@',
+  '0 @FBob@ FAM', '1 HUSB @Bob@', '1 WIFE @BobSpouse@', '1 CHIL @BobChild@',
+  '0 @FEve@ FAM', '1 HUSB @EveSpouse@', '1 WIFE @Eve@', '1 CHIL @EveChild@',
+  '0 @FCousins@ FAM', '1 HUSB @BobChild@', '1 WIFE @EveChild@',
+  '0 TRLR',
+].join('\n'));
+const sibLay = layoutGraph(sibs.individuals, sibs.families);
+eq('joined into one component via the cousin marriage', sibLay.components, 1);
+const spanOf = (...ids) => {
+  const xs = ids.map((id) => sibLay.nodeById.get(id).x);
+  return { min: Math.min(...xs), max: Math.max(...xs) };
+};
+const familyASpan = spanOf('@Alice@', '@Bob@', '@Carol@');
+const familyBSpan = spanOf('@Dave@', '@Eve@', '@Frank@');
+const inSpan = (id, span) => { const x = sibLay.nodeById.get(id).x; return x >= span.min && x <= span.max; };
+check('family A siblings occupy a contiguous block', !inSpan('@Dave@', familyASpan) && !inSpan('@Eve@', familyASpan) && !inSpan('@Frank@', familyASpan));
+check('family B siblings occupy a contiguous block', !inSpan('@Alice@', familyBSpan) && !inSpan('@Bob@', familyBSpan) && !inSpan('@Carol@', familyBSpan));
+check("Bob's spouse sits inside family A's block (expected, not an interloper)", inSpan('@BobSpouse@', familyASpan));
+check("Eve's spouse sits inside family B's block (expected, not an interloper)", inSpan('@EveSpouse@', familyBSpan));
+
 section('Focused subsets');
 const sub = relatedSubset(q.individuals, '@I4@', 1, 1);
 check('subset holds the person', sub.has('@I4@'));

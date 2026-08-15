@@ -90,13 +90,36 @@ check('report states a verdict', /error|conforms/.test(doc.querySelector('.verdi
 check('every finding has samples', [...doc.querySelectorAll('#findings .finding')]
   .every((f) => f.querySelectorAll('.samples li').length > 0));
 
-// Clicking a card must open the detail drawer with content.
+// Hovering a card (without clicking) must show the lightweight peek.
 const first = cards[0];
+first.dispatchEvent(new window.MouseEvent('pointerover', { bubbles: true, clientX: 100, clientY: 100 }));
+check('peek opens on hover', doc.getElementById('peek').classList.contains('on'));
+check('peek names the person', doc.querySelector('#peek .pname').textContent.trim().length > 0,
+  doc.querySelector('#peek .pname').textContent);
+first.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 140, clientY: 130 }));
+check('peek follows the pointer', doc.getElementById('peek').style.left.length > 0);
+first.dispatchEvent(new window.MouseEvent('pointerout', { bubbles: true, relatedTarget: doc.body }));
+check('peek closes when the pointer leaves', !doc.getElementById('peek').classList.contains('on'));
+
+// Clicking a card must open the detail drawer with content, and hide any peek.
+first.dispatchEvent(new window.MouseEvent('pointerover', { bubbles: true, clientX: 100, clientY: 100 }));
 first.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 check('detail drawer opens on click', doc.getElementById('detail').classList.contains('open'));
+check('click closes any open peek', !doc.getElementById('peek').classList.contains('on'));
 check('detail drawer has a name', doc.getElementById('dName').textContent.trim().length > 0,
   doc.getElementById('dName').textContent);
 check('detail drawer has sections', doc.querySelectorAll('#dBody .dsec').length > 0);
+check('detail meta reports sex and id at minimum', doc.getElementById('dMeta').textContent.trim().length > 0,
+  doc.getElementById('dMeta').textContent);
+
+// Focus mode should explain how far the selected person is from the focus root.
+doc.querySelector('#dBody [data-act="focus"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+const otherCard = [...svg.querySelectorAll('g.card')].find((c) => c !== first) || svg.querySelectorAll('g.card')[0];
+otherCard.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+check('detail drawer still opens for a second person in focus mode',
+  doc.getElementById('dName').textContent.trim().length > 0);
+doc.getElementById('viewMode').value = 'all';
+doc.getElementById('viewMode').dispatchEvent(new window.Event('change'));
 
 // Search.
 const si = doc.getElementById('search');
