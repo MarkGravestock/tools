@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { parseGedcom, parseGedcomDate, tokenizeGedcom } from '../src/gedcom.js';
 import { validateGedcom } from '../src/validate.js';
-import { layoutGraph, relatedSubset } from '../src/layout.js';
+import { layoutGraph, relatedSubset, computeGroupBoundaries } from '../src/layout.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = (n) => readFileSync(join(here, 'fixtures', n), 'utf8');
@@ -251,6 +251,20 @@ check('family A siblings occupy a contiguous block', !inSpan('@Dave@', familyASp
 check('family B siblings occupy a contiguous block', !inSpan('@Alice@', familyBSpan) && !inSpan('@Bob@', familyBSpan) && !inSpan('@Carol@', familyBSpan));
 check("Bob's spouse sits inside family A's block (expected, not an interloper)", inSpan('@BobSpouse@', familyASpan));
 check("Eve's spouse sits inside family B's block (expected, not an interloper)", inSpan('@EveSpouse@', familyBSpan));
+
+section('Sibling-group divider markers');
+// A married-in spouse sitting beside their partner is correct, not scattering
+// — computeGroupBoundaries is what lets the renderer draw a visual cue so it
+// doesn't read as mixing. Exactly one boundary should separate family A's
+// block from family B's, and none should appear inside either block despite
+// the spouses interleaved within them.
+const gen1Boundaries = sibLay.groupBoundaries.filter((b) => b.y === 1 * sibLay.metrics.ROW_H);
+eq('exactly one boundary between the two unrelated sibling blocks', gen1Boundaries.length, 1);
+const boundaryX = gen1Boundaries[0].x;
+check('the boundary sits between the two family blocks',
+  boundaryX > familyASpan.max && boundaryX < familyBSpan.min);
+check('computeGroupBoundaries matches what layoutGraph already returned',
+  JSON.stringify(computeGroupBoundaries(sibLay.clusters)) === JSON.stringify(sibLay.groupBoundaries));
 
 section('Focused subsets');
 const sub = relatedSubset(q.individuals, '@I4@', 1, 1);

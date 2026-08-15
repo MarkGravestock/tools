@@ -92,14 +92,33 @@ check('every finding has samples', [...doc.querySelectorAll('#findings .finding'
 
 // Hovering a card (without clicking) must show the lightweight peek.
 const first = cards[0];
+const peekEl = doc.getElementById('peek');
 first.dispatchEvent(new window.MouseEvent('pointerover', { bubbles: true, clientX: 100, clientY: 100 }));
-check('peek opens on hover', doc.getElementById('peek').classList.contains('on'));
+check('peek opens on hover', peekEl.classList.contains('on'));
 check('peek names the person', doc.querySelector('#peek .pname').textContent.trim().length > 0,
   doc.querySelector('#peek .pname').textContent);
 first.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 140, clientY: 130 }));
-check('peek follows the pointer', doc.getElementById('peek').style.left.length > 0);
+check('peek follows the pointer', peekEl.style.left.length > 0);
+
+// Leaving the card for the peek itself must NOT close it (the whole point:
+// the peek has a "click for full details" affordance, so the pointer has to
+// be able to reach it) — nor must leaving briefly for the gap in between,
+// since the hide is deferred to bridge that gap.
+first.dispatchEvent(new window.MouseEvent('pointerout', { bubbles: true, relatedTarget: peekEl }));
+check('peek stays open when the pointer moves onto it', peekEl.classList.contains('on'));
+peekEl.dispatchEvent(new window.MouseEvent('pointerover', { bubbles: true }));
+peekEl.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+check('clicking the peek opens the full detail drawer', doc.getElementById('detail').classList.contains('open'));
+doc.getElementById('dClose').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+
+// Leaving for somewhere that is neither the card nor the peek schedules a
+// hide rather than firing it instantly, then actually closes it.
+first.dispatchEvent(new window.MouseEvent('pointerover', { bubbles: true, clientX: 100, clientY: 100 }));
+check('peek reopens on re-hover', peekEl.classList.contains('on'));
 first.dispatchEvent(new window.MouseEvent('pointerout', { bubbles: true, relatedTarget: doc.body }));
-check('peek closes when the pointer leaves', !doc.getElementById('peek').classList.contains('on'));
+check('peek has not closed the instant the pointer leaves (bridging delay)', peekEl.classList.contains('on'));
+await new Promise((r) => setTimeout(r, 260));
+check('peek closes once the bridging delay elapses', !peekEl.classList.contains('on'));
 
 // Clicking a card must open the detail drawer with content, and hide any peek.
 first.dispatchEvent(new window.MouseEvent('pointerover', { bubbles: true, clientX: 100, clientY: 100 }));
