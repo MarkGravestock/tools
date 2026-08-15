@@ -1,0 +1,13 @@
+{
+  "name": "gedcom-family-tree",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node src/build.mjs",
+    "test": "node test/test.mjs",
+    "smoke": "node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0"
+  }
+}

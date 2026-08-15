@@ -132,6 +132,12 @@
       description: "Drop your own Parquet file and read its schema, metadata and rows in the browser — a Java parser (Hardwood) compiled to WebAssembly with GraalVM Native Image and called from JS via @JS interop. The GraalVM counterpart to the CheerpJ-based Calcite tool — Java in the browser, two ways.",
       tags: ["Parquet", "GraalVM", "Native Image", "WASM", "Java"],
     },
+    {
+      title: "GEDCOM Family Tree",
+      href: "gedcom-family-tree/gedcom-family-tree.html",
+      description: "Open a family tree file and see the whole thing at once — every individual, every family, every unconnected branch, laid out by generation. Alongside it, a report on how the file measures up against the GEDCOM 5.5.1 specification. Nothing is uploaded.",
+      tags: ["GEDCOM", "Genealogy", "SVG", "Validation"],
+    },
   ];
 
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
