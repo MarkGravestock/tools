@@ -22,10 +22,13 @@ First load fetches two fonts from Google Fonts; after that it is all local.
   siblings and cousins, to a depth you set. Pick someone, then
   *Show their relatives*.
 - **Search** (or `/`) finds a person by name and zooms to them.
-- Clicking anyone opens a panel with every event the file records for them —
-  not just birth and death, but residences, occupations, baptisms, probate,
-  military service and whatever else the exporter wrote down — plus parents,
-  siblings, each marriage with its children, notes, sources and media.
+- Hovering anyone shows a quick-glance card — name, dates, birth/death place,
+  occupation, parents, spouse(s), child count — without needing to click.
+  Clicking opens the full panel: every event the file records for them, not
+  just birth and death but residences, baptisms, probate, military service
+  and whatever else the exporter wrote down, plus parents, siblings, each
+  marriage with its children, notes, sources and media. In a focused view it
+  also says how many generations the person sits from the one you focused on.
 - **Report** opens the validation report. **SVG** downloads the current view.
 - Keys: `/` search · `f` fit · `+` / `−` zoom · `Esc` close.
 
@@ -91,12 +94,15 @@ npm run build   # inline src/ modules into gedcom-family-tree.html
 npm run smoke   # drives the built file end to end in jsdom
 ```
 
-`npm test` runs 130 assertions against two fixtures: `clean.ged`, which must
+`npm test` runs 135 assertions against two fixtures: `clean.ged`, which must
 produce zero errors and zero warnings, and `quirks.ged`, which reproduces every
 defect found in a real Ancestry.com export and asserts each one is caught. It
 also checks layout invariants — everyone placed once, no overlapping cards,
-children below their parents, couples level — including for an uncle–niece
-marriage, which is the case that breaks naive generation numbering.
+children below their parents, couples level, and (given two sibling groups
+joined only through a grandchild-generation marriage) that each family's
+children land in one contiguous block rather than interleaved by raw birth
+year — including for an uncle–niece marriage, which is the case that breaks
+naive generation numbering.
 
 `npm run smoke` loads the built HTML, feeds it a GEDCOM and checks the page
 really drew the tree, the report, the detail drawer and the search. It writes
@@ -128,6 +134,17 @@ inlines them into the page's single module script.
   across nine generations comes out about 33,000 pixels wide. That is the shape
   of the data, not a layout failure; the overview zoom and the focused view are
   the way through it.
+- A person who married into a different family competes for a single position
+  between their birth siblings and their spouse's birth siblings — they can sit
+  contiguous with only one side. This is not a bug to fix but a structural
+  property of genealogical data: it is a DAG (a person is simultaneously a
+  child in one family and a parent in another, and cousin marriages create
+  cross-links), and no algorithm built on strict hierarchical tree-drawing can
+  make both a person's birth family and their marriage family fully contiguous
+  at once when the two compete for the same row. It is rare in practice — in
+  the 477-person file used to build this, 5 people (1.0%) end up separated
+  from their birth siblings this way, always because they married into a
+  family whose own walk reached their shared couple-cluster first.
 
 ## Further reading
 

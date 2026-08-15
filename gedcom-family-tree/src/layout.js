@@ -173,7 +173,7 @@ function seedOrder(clusters, families, gen) {
       .sort((a, b) => (a.marriageYear ?? 9999) - (b.marriageYear ?? 9999));
     for (const f of fams) {
       const children = [...f.childRefs].sort((a, b) => birthKey(a) - birthKey(b));
-      for (const ch of children) walk(clusterOf.get(ch));
+      for (const ch of children) walk(clusterOf.get(ch.id));
     }
   };
 

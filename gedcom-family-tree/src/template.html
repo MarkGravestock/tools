@@ -278,6 +278,24 @@
   #empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
   #empty[hidden] { display: none; }
 
+  /* ── Hover peek ──────────────────────────────────────────────────────── */
+  #peek {
+    position: absolute; z-index: 8; pointer-events: none;
+    width: 240px; max-width: calc(100% - 24px);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 10px 26px rgba(0,0,0,0.22);
+    padding: 10px 12px; font-size: 12.5px;
+    opacity: 0; transform: translateY(2px);
+    transition: opacity 0.1s ease, transform 0.1s ease;
+  }
+  #peek.on { opacity: 1; transform: translateY(0); }
+  #peek .ph { display: flex; align-items: baseline; gap: 7px; margin-bottom: 5px; }
+  #peek .pname { font-family: var(--disp); font-weight: 700; font-size: 14px; }
+  #peek .pyrs { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+  #peek .prow { display: flex; gap: 6px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+  #peek .prow b { color: var(--ink); font-weight: 500; }
+  #peek .phint { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); font-style: italic; }
+
   @media (max-width: 900px) {
     #detail { position: absolute; right: 0; top: 0; bottom: 0; z-index: 10; width: min(350px, 92vw); margin-right: -100%; }
     #detail.open { margin-right: 0; box-shadow: -8px 0 30px rgba(0,0,0,0.25); }
@@ -373,6 +391,7 @@
     <div id="canvasWrap">
       <svg id="canvas" role="img" aria-label="Family tree"></svg>
       <div id="empty" hidden>Nothing to draw for this selection.</div>
+      <div id="peek" aria-hidden="true"></div>
 
       <div class="hud left">
         <div class="legend" id="legend"></div>
@@ -804,12 +823,89 @@ function centreOn(id, k) {
     const card = e.target.closest && e.target.closest('.card');
     if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showPerson(card.getAttribute('data-id')); }
   });
+
+  // ---- Hover peek: a quick-glance card, no click required -----------------
+  // pointerover/pointerout (unlike mouseenter/leave) bubble, so one pair of
+  // delegated listeners covers every card without per-card wiring.
+  let peekId = null;
+  svg.addEventListener('pointerover', (e) => {
+    if (dragging) return;
+    const card = e.target.closest('.card');
+    if (!card) return;
+    const id = card.getAttribute('data-id');
+    if (id === peekId) return;
+    peekId = id;
+    showPeek(id, e.clientX, e.clientY);
+  });
+  svg.addEventListener('pointermove', (e) => {
+    if (dragging || !peekId) return;
+    movePeek(e.clientX, e.clientY);
+  });
+  svg.addEventListener('pointerout', (e) => {
+    const card = e.target.closest('.card');
+    if (!card) return;
+    // Moving from one part of a card to another (e.g. text to rect) still
+    // fires pointerout; only hide once the pointer has actually left the card.
+    if (e.relatedTarget && card.contains(e.relatedTarget)) return;
+    peekId = null;
+    hidePeek();
+  });
+  svg.addEventListener('pointerdown', hidePeek);
+  svg.addEventListener('wheel', hidePeek, { passive: true });
 })();
+
+// ---- Hover peek ---------------------------------------------------------
+const PEEK_MARGIN = 14;
+
+function peekHtml(p) {
+  const sexLabel = { M: 'Male', F: 'Female' }[p.sex] || 'Sex not recorded';
+  const rows = [];
+  if (p.birth && p.birth.place) rows.push(['Born', p.birth.place]);
+  if (p.death && p.death.place) rows.push(['Died', p.death.place]);
+  const occ = p.attributes.find((a) => a.tag === 'OCCU' && (a.value || a.hasContent));
+  if (occ) rows.push(['Occupation', occ.value && occ.value !== 'Y' ? occ.value : (occ.place || occ.label)]);
+  if (p.parents.length) rows.push(['Parent' + (p.parents.length > 1 ? 's' : ''), p.parents.map((x) => x.name.full).join(' & ')]);
+  if (p.spouseRefs.length) rows.push(['Spouse' + (p.spouseRefs.length > 1 ? 's' : ''), p.spouseRefs.map((x) => x.name.full).join(', ')]);
+  if (p.childrenRefs.length) rows.push(['Children', String(p.childrenRefs.length)]);
+
+  return '<div class="ph"><span class="pname">' + esc(p.name.full) + '</span>' +
+    (p.lifespan ? '<span class="pyrs">' + esc(p.lifespan) + '</span>' : '') + '</div>' +
+    '<div class="prow"><span>' + sexLabel + '</span></div>' +
+    rows.map(([k, v]) => '<div class="prow"><b>' + esc(k) + ':</b> ' + esc(v) + '</div>').join('') +
+    '<div class="phint">Click for full details</div>';
+}
+
+function showPeek(id, clientX, clientY) {
+  const p = data.individuals.get(id);
+  if (!p) return;
+  const el = $('peek');
+  el.innerHTML = peekHtml(p);
+  el.classList.add('on');
+  movePeek(clientX, clientY);
+}
+
+function movePeek(clientX, clientY) {
+  const el = $('peek');
+  if (!el.classList.contains('on')) return;
+  const wrap = $('canvasWrap').getBoundingClientRect();
+  let x = clientX - wrap.left + PEEK_MARGIN;
+  let y = clientY - wrap.top + PEEK_MARGIN;
+  const w = el.offsetWidth || 240, h = el.offsetHeight || 120;
+  if (x + w > wrap.width - 6) x = clientX - wrap.left - w - PEEK_MARGIN;
+  if (y + h > wrap.height - 6) y = clientY - wrap.top - h - PEEK_MARGIN;
+  el.style.left = Math.max(6, x) + 'px';
+  el.style.top = Math.max(6, y) + 'px';
+}
+
+function hidePeek() {
+  $('peek').classList.remove('on');
+}
 
 // ---- Detail drawer ----------------------------------------------------------
 function showPerson(id) {
   const p = data.individuals.get(id);
   if (!p) return;
+  hidePeek();
   const previous = selectedId;
   selectedId = id;
   paintSelection(previous);
@@ -818,9 +914,19 @@ function showPerson(id) {
     (p.name.surname ? ' <span class="sur">' + esc(p.name.surname) + '</span>' : '') +
     (p.name.suffix ? ' ' + esc(p.name.suffix) : '');
   const sexLabel = { M: 'male', F: 'female' }[p.sex] || 'sex not recorded';
-  $('dMeta').textContent = [sexLabel, p.lifespan, p.id].filter(Boolean).join(' · ');
+  const age = (p.birthYear !== null && p.deathYear !== null && p.deathYear >= p.birthYear && p.deathYear - p.birthYear <= 130)
+    ? 'aged ' + (p.deathYear - p.birthYear) : '';
+  $('dMeta').textContent = [sexLabel, p.lifespan, age, p.id].filter(Boolean).join(' · ');
 
   const out = [];
+  if ($('viewMode').value === 'focus' && focusId && focusId !== id && view && view.nodeById.has(id) && view.nodeById.has(focusId)) {
+    const focusPerson = data.individuals.get(focusId);
+    const dist = view.nodeById.get(id).gen - view.nodeById.get(focusId).gen;
+    if (focusPerson && dist !== 0) {
+      const word = dist > 0 ? 'generation' + (Math.abs(dist) > 1 ? 's' : '') + ' below' : 'generation' + (Math.abs(dist) > 1 ? 's' : '') + ' above';
+      out.push('<div class="kv" style="margin-bottom:12px">' + Math.abs(dist) + ' ' + word + ' <b>' + esc(focusPerson.name.full) + '</b> in this view</div>');
+    }
+  }
   out.push('<div class="dactions">' +
     '<button class="secondary" data-act="focus">Show their relatives</button>' +
     '<button class="ghost" data-act="centre">Centre in the tree</button>' +
