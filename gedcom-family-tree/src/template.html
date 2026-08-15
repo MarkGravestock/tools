@@ -288,7 +288,8 @@
     opacity: 0; transform: translateY(2px);
     transition: opacity 0.1s ease, transform 0.1s ease;
   }
-  #peek.on { opacity: 1; transform: translateY(0); }
+  #peek.on { opacity: 1; transform: translateY(0); pointer-events: auto; cursor: pointer; }
+  #peek.on:hover { border-color: var(--pg); }
   #peek .ph { display: flex; align-items: baseline; gap: 7px; margin-bottom: 5px; }
   #peek .pname { font-family: var(--disp); font-weight: 700; font-size: 14px; }
   #peek .pyrs { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
@@ -461,6 +462,8 @@ let transform = { k: 1, x: 0, y: 0 };
 let severityFilter = 'all';
 // id → the card's body rect, so selection can repaint two cards instead of all.
 const cardBodies = new Map();
+let peekId = null;
+let peekHideTimer = null;
 
 // ---- Theme ------------------------------------------------------------------
 function applyTheme(t) {
@@ -826,12 +829,17 @@ function centreOn(id, k) {
 
   // ---- Hover peek: a quick-glance card, no click required -----------------
   // pointerover/pointerout (unlike mouseenter/leave) bubble, so one pair of
-  // delegated listeners covers every card without per-card wiring.
-  let peekId = null;
+  // delegated listeners covers every card without per-card wiring. The peek
+  // itself is a separate DOM element the pointer has to cross a gap to
+  // reach, so leaving a card schedules a short-delayed hide rather than an
+  // immediate one — long enough to bridge that gap, cancelled the moment the
+  // pointer lands on either the card or the peek.
+  const peekEl = $('peek');
   svg.addEventListener('pointerover', (e) => {
     if (dragging) return;
     const card = e.target.closest('.card');
     if (!card) return;
+    cancelPeekHide();
     const id = card.getAttribute('data-id');
     if (id === peekId) return;
     peekId = id;
@@ -844,14 +852,18 @@ function centreOn(id, k) {
   svg.addEventListener('pointerout', (e) => {
     const card = e.target.closest('.card');
     if (!card) return;
-    // Moving from one part of a card to another (e.g. text to rect) still
-    // fires pointerout; only hide once the pointer has actually left the card.
-    if (e.relatedTarget && card.contains(e.relatedTarget)) return;
-    peekId = null;
-    hidePeek();
+    if (e.relatedTarget && (card.contains(e.relatedTarget) || peekEl.contains(e.relatedTarget))) return;
+    schedulePeekHide();
   });
-  svg.addEventListener('pointerdown', hidePeek);
-  svg.addEventListener('wheel', hidePeek, { passive: true });
+  svg.addEventListener('pointerdown', closePeekNow);
+  svg.addEventListener('wheel', closePeekNow, { passive: true });
+
+  peekEl.addEventListener('pointerover', cancelPeekHide);
+  peekEl.addEventListener('pointerout', (e) => {
+    if (e.relatedTarget && peekEl.contains(e.relatedTarget)) return;
+    schedulePeekHide();
+  });
+  peekEl.addEventListener('click', () => { if (peekId) showPerson(peekId); });
 })();
 
 // ---- Hover peek ---------------------------------------------------------
@@ -872,7 +884,7 @@ function peekHtml(p) {
     (p.lifespan ? '<span class="pyrs">' + esc(p.lifespan) + '</span>' : '') + '</div>' +
     '<div class="prow"><span>' + sexLabel + '</span></div>' +
     rows.map(([k, v]) => '<div class="prow"><b>' + esc(k) + ':</b> ' + esc(v) + '</div>').join('') +
-    '<div class="phint">Click for full details</div>';
+    '<div class="phint">Click for full details →</div>';
 }
 
 function showPeek(id, clientX, clientY) {
@@ -897,15 +909,35 @@ function movePeek(clientX, clientY) {
   el.style.top = Math.max(6, y) + 'px';
 }
 
+// Immediate visual hide only — callers that also need to forget which person
+// was peeked (so hovering the same card again re-triggers) use closePeekNow.
 function hidePeek() {
   $('peek').classList.remove('on');
+}
+
+function cancelPeekHide() {
+  if (peekHideTimer) { clearTimeout(peekHideTimer); peekHideTimer = null; }
+}
+
+// A short delay, not an instant hide, so the pointer has time to cross the
+// gap between a card and the peek floating near it without the peek
+// vanishing out from under the cursor.
+function schedulePeekHide() {
+  cancelPeekHide();
+  peekHideTimer = setTimeout(closePeekNow, 220);
+}
+
+function closePeekNow() {
+  cancelPeekHide();
+  peekId = null;
+  hidePeek();
 }
 
 // ---- Detail drawer ----------------------------------------------------------
 function showPerson(id) {
   const p = data.individuals.get(id);
   if (!p) return;
-  hidePeek();
+  closePeekNow();
   const previous = selectedId;
   selectedId = id;
   paintSelection(previous);

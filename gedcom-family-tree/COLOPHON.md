@@ -174,6 +174,17 @@ in the same pass: age at death when both years are known, and — in a focused
 view — how many generations the selected person sits from the one you
 focused on.
 
+The first version shipped with a "Click for full details" hint inside the
+peek that could not itself be clicked — `pointer-events: none` on the peek
+(needed so an invisible-but-still-present peek doesn't block clicks on the
+card underneath it while hidden) also blocked clicks while it was *visible*,
+and moving the cursor toward the peek to click it counted as leaving the
+card, hiding it before the click landed. Fixed by scoping
+`pointer-events: auto` to the `.on` (visible) state, wiring a click handler
+onto the peek itself, and replacing the instant hide with a ~220ms deferred
+one that's cancelled if the pointer lands on either the card or the peek —
+enough to bridge the gap between them without leaving stale peeks around.
+
 ## Versions at build time
 
 No runtime dependencies. jsdom 25 for the smoke test. Fonts: Space Grotesk +
